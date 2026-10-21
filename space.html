@@ -12,7 +12,7 @@
 <div id="hud" class="hidden">
   <div>
     <div class="big">Score <span id="score">0</span></div>
-    <div class="small">Best <span id="best">0</span> · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>Q</kbd> quit</div>
+    <div class="small">Best <span id="best">0</span> · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit</div>
   </div>
   <div id="lives" class="hearts right"></div>
 </div>
@@ -36,6 +36,8 @@
     </div>
     <div id="status"></div>
     <div class="settings">
+      <label>Music <kbd>N</kbd>
+        <input id="music-toggle" type="checkbox" checked></label>
       <label>Camera
         <select id="cam-select"><option value="auto">Auto (skip virtual cameras)</option></select></label>
       <label>Head sensitivity <span id="sens-val">1.0×</span>
@@ -66,6 +68,7 @@
 <script type="module">
 import { $, rand, clamp, dist2, loadNum, saveStr, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
 import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay } from "./js/face.js";
+import { Music, SONGS, bindMusicToggle, setMusicEnabled, musicPrefs } from "./js/music.js";
 
 const view = fitCanvas($("game"));
 const ctx = view.ctx;
@@ -87,6 +90,7 @@ const keys = trackKeys((code) => {
   if (code === "KeyC") calib.reset();
   if (code === "KeyP" || code === "Escape") { if (S.running && !S.over) S.paused = !S.paused; }
   if (code === "KeyM") audio.muted = !audio.muted;
+  if (code === "KeyN") setMusicEnabled(!musicPrefs.enabled);
   if (code === "KeyQ" && S.running) showMenu();
   if ((code === "Enter" || code === "NumpadEnter") && S.over) startGame(S.mode);
 });
@@ -95,6 +99,8 @@ const keys = trackKeys((code) => {
 const video = $("cam");
 const camCtx = $("cam-overlay").getContext("2d");
 const tracker = new FaceTracker(video, { numFaces: 1, cameraSelect: $("cam-select"), onStatus: setStatus });
+const music = new Music(SONGS.pilot);
+bindMusicToggle($("music-toggle"));
 const calib = new Calibrator(15);
 const face = { present: false, nose: { x: 0.5, y: 0.5 }, jaw: 0 };
 bindCameraSelect($("cam-select")).catch(() => {});
@@ -151,7 +157,7 @@ const S = {
 };
 const bg = Array.from({ length: 160 }, () => ({ x: Math.random(), y: Math.random(), z: rand(0.2, 1) }));
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
-window.facePilot = { S, face, calib, tracker, step: (dt = 1 / 60) => update(dt) };
+window.facePilot = { S, music, face, calib, tracker, step: (dt = 1 / 60) => update(dt) };
 
 function startGame(mode) {
   Object.assign(S, {
@@ -161,6 +167,7 @@ function startGame(mode) {
   });
   S.ship.x = view.W / 2; S.ship.y = view.H * 0.72; S.ship.tilt = 0;
   keys.clear();
+  music.restart();
   unlockAudio();
   if (mode === "face") calib.reset();
   $("menu").classList.add("hidden");
@@ -428,6 +435,7 @@ function frame(now) {
   if (dt <= 0) { requestAnimationFrame(frame); return; }
   last = now;
   if (S.mode === "face" && S.running) updateFace(now, dt);
+  music.setPlaying(S.running && !S.over && !S.paused);
   update(dt);
   render(now);
   requestAnimationFrame(frame);

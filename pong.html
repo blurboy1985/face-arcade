@@ -40,6 +40,8 @@
     </div>
     <div id="status"></div>
     <div class="settings">
+      <label>Music <kbd>N</kbd>
+        <input id="music-toggle" type="checkbox" checked></label>
       <label>Camera
         <select id="cam-select"><option value="auto">Auto (skip virtual cameras)</option></select></label>
       <label>Head sensitivity <span id="sens-val">1.0×</span>
@@ -72,6 +74,7 @@
 <script type="module">
 import { $, rand, clamp, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
 import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay } from "./js/face.js";
+import { Music, SONGS, bindMusicToggle, setMusicEnabled, musicPrefs } from "./js/music.js";
 
 const view = fitCanvas($("game"));
 const ctx = view.ctx;
@@ -89,6 +92,7 @@ const keys = trackKeys((code) => {
   if (code === "KeyC") S.players.forEach((p) => p.calib.reset());
   if (code === "KeyP" || code === "Escape") { if (S.running && !S.over) S.paused = !S.paused; }
   if (code === "KeyM") audio.muted = !audio.muted;
+  if (code === "KeyN") setMusicEnabled(!musicPrefs.enabled);
   if (code === "KeyQ" && S.running) showMenu();
   if ((code === "Enter" || code === "NumpadEnter") && S.over) startGame(S.mode);
 });
@@ -97,6 +101,8 @@ const keys = trackKeys((code) => {
 const video = $("cam");
 const camCtx = $("cam-overlay").getContext("2d");
 const tracker = new FaceTracker(video, { numFaces: 2, cameraSelect: $("cam-select"), onStatus: setStatus });
+const music = new Music(SONGS.pong);
+bindMusicToggle($("music-toggle"));
 bindCameraSelect($("cam-select")).catch(() => {});
 
 // Splits detected faces between the players by which side of the (mirrored) picture they are on.
@@ -157,7 +163,7 @@ const S = {
   speed: 0, serveTimer: 0, serveDir: 1, message: "", particles: [], cpuErr: 0,
 };
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
-window.facePong = { S, tracker, keys, assignFaces, step: (dt = 1 / 60) => update(dt) };
+window.facePong = { S, music, tracker, keys, assignFaces, step: (dt = 1 / 60) => update(dt) };
 
 const paddle = () => ({ w: 14, h: clamp(view.H * 0.2, 70, 170), inset: Math.max(28, view.W * 0.04) });
 const baseSpeed = () => clamp(view.W * 0.45, 300, 700);
@@ -169,14 +175,15 @@ function startGame(mode) {
   Object.assign(S, { running: true, paused: false, over: false, particles: [], message: "" });
   serve(Math.random() < 0.5 ? -1 : 1);
   keys.clear();
+  music.restart();
   unlockAudio();
   $("menu").classList.add("hidden");
   $("gameover").classList.add("hidden");
   $("hud").classList.remove("hidden");
   $("cam-panel").classList.toggle("hidden", mode === "keys");
   $("hud-help").innerHTML = mode === "keys"
-    ? `<span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> · <kbd>D</kbd> power &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> · <kbd>←</kbd> power &nbsp;|&nbsp; <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>Q</kbd> quit`
-    : `Head up/down = paddle · mouth open at impact = power shot · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>Q</kbd> quit`;
+    ? `<span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> · <kbd>D</kbd> power &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> · <kbd>←</kbd> power &nbsp;|&nbsp; <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`
+    : `Head up/down = paddle · mouth open at impact = power shot · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`;
 }
 
 function serve(dir) {
@@ -415,6 +422,7 @@ function frame(now) {
   if (dt <= 0) { requestAnimationFrame(frame); return; }
   last = now;
   if (S.running && S.mode !== "keys") updateFaces(now, dt);
+  music.setPlaying(S.running && !S.over && !S.paused);
   update(dt);
   render();
   requestAnimationFrame(frame);

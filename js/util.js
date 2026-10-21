@@ -59,6 +59,12 @@ const SFX = {
   win:    ["sine", 523, 1046, 0.6, 0.1],
 };
 
+// One shared AudioContext for sound effects and music (null if Web Audio is unavailable).
+export function getAudioContext() {
+  try { actx ||= new AudioContext(); } catch { return null; }
+  return actx;
+}
+
 export function sfx(kind) {
   if (audio.muted) return;
   try {

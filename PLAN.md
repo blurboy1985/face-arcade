@@ -47,6 +47,17 @@ Webcam face-controlled browser games. A launcher lets the player choose 1 of 3 g
 - [x] Pushed to new public repo https://github.com/blurboy1985/face-arcade (branch main).
 - [x] GitHub Pages enabled (main, /): https://blurboy1985.github.io/face-arcade/
 
+## Background music (2026-10-21)
+- `js/music.js`: tiny Web Audio chiptune sequencer (lead / arpeggio / bass / drums) + 3 original songs
+  (Pilot: A minor synth arps · Jump: bouncy C major · Pong: driving E minor). No audio files, no copied tunes.
+- Plays while a game is running; pauses on pause / hidden tab; stops on game over, win, menu.
+- Toggle: "Music" checkbox in each menu + `N` key (remembered). `M` still mutes everything.
+- Verify: song bars well-formed, music bus produces signal while playing and silence when paused/stopped,
+  no console errors; push → Pages redeploy.
+- [x] Verified in Chrome (real click to unlock audio, AnalyserNode on the music bus): all 3 songs 128 steps;
+  RMS ~0.06–0.07 while playing, 0 when paused / after win / game over / muted (M) / on menu;
+  N toggles + persists; rematch restarts at step 0; no console errors.
+
 ## Previous work (Face Pilot)
 - Done and verified; camera fix: Chrome lists LSVCam / AMD Privacy View / OBS Virtual (virtual) + UGREEN Camera 4K (real).
   Auto mode ranks real cams first and skips black feeds. User's UGREEN image was black (shutter likely closed).

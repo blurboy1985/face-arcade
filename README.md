@@ -27,7 +27,8 @@ Then open http://localhost:8000 in **Chrome or Edge** and allow camera access.
 - **Calibration:** sit centered and hold still for ~1 second when a game starts. Press `C` to recalibrate.
 - **Face Pong with 2 players:** sit side by side so both faces fit in the camera preview. The person on the left of the screen controls the left paddle.
 - Each game's menu has sliders for head sensitivity and how wide your mouth must open.
-- Other keys: `P` pause · `M` mute · `Enter` restart after game over.
+- Other keys: `P` pause · `M` mute all sound · `N` music on/off · `Q` quit to menu · `Enter` restart after game over.
+- **Music:** each game has its own original chiptune soundtrack, generated live with the Web Audio API (no audio files). Toggle it with the *Music* checkbox in the menu or `N`.
 
 ## Camera troubleshooting
 
@@ -44,6 +45,7 @@ jump.html        Face Jump
 pong.html        Face Pong
 js/face.js       webcam selection + MediaPipe face tracking (shared)
 js/util.js       helpers, sound effects, keyboard input (shared)
+js/music.js      chiptune sequencer + the three background songs
 css/common.css   shared styles
 ```
 
