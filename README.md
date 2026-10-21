@@ -1,6 +1,6 @@
 # Face Arcade
 
-**▶ Play now: https://blurboy1985.github.io/face-arcade/** (Chrome or Edge, allow camera access)
+**▶ Play now: https://face-arcade.danielquek.com** (Chrome or Edge, allow camera access) — mirror: https://blurboy1985.github.io/face-arcade/
 
 Three browser games you control with your **face** through a webcam. Face tracking runs locally in the browser with Google MediaPipe Face Landmarker — no video ever leaves your machine.
 
@@ -35,6 +35,17 @@ Then open http://localhost:8000 in **Chrome or Edge** and allow camera access.
 - **"Could not start video source" / black preview:** PCs often have virtual cameras (OBS, AMD Privacy View, LSVCam) that the browser picks by default. The **Camera** menu's *Auto* option skips them, or pick your real webcam there.
 - **"Camera image is black":** open the webcam's privacy shutter / lens cover, or turn on a light.
 - Close other apps using the camera (Teams, Zoom, Camera app) if it still won't start.
+
+## Deploy
+
+- **Cloudflare** (face-arcade.danielquek.com): a static-assets Worker configured in `wrangler.jsonc`.
+  `.assetsignore` uploads only the site files. Deploy with:
+
+  ```bash
+  npx wrangler@4.148.0 deploy
+  ```
+
+- **GitHub Pages** mirror: updates automatically on every push to `main`.
 
 ## Project layout
 

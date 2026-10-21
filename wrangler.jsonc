@@ -1,0 +1,12 @@
+// Cloudflare deployment: a static-assets-only Worker serving this folder at face-arcade.danielquek.com.
+// Deploy with:  npx wrangler@4.148.0 deploy
+{
+  "name": "face-arcade",
+  "compatibility_date": "2026-10-21",
+  "assets": {
+    "directory": "."
+  },
+  "routes": [
+    { "pattern": "face-arcade.danielquek.com", "custom_domain": true }
+  ]
+}

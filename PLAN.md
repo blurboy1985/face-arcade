@@ -66,7 +66,9 @@ Webcam face-controlled browser games. A launcher lets the player choose 1 of 3 g
 - Pong: pucker at impact (A / → on keyboard) → curve shot, once per player per rally; paddle glows purple.
 - Pucker meter + "Pucker trigger level" slider; launcher + README updated.
 - [x] Verified in Chrome via step(): all behaviours above, level still beatable by bot, no console errors.
-- [ ] Publish at face-arcade.danielquek.com on the user's Cloudflare (requested).
+- [x] Published at https://face-arcade.danielquek.com — Cloudflare Worker "face-arcade" (static assets,
+  custom domain) on account daniel.tianwen@gmail.com, via `npx wrangler@4.148.0 deploy`.
+  Uploaded exactly the 8 site files (allowlist `.assetsignore`); PLAN/README/config/.git return 404.
 
 ## Previous work (Face Pilot)
 - Done and verified; camera fix: Chrome lists LSVCam / AMD Privacy View / OBS Virtual (virtual) + UGREEN Camera 4K (real).

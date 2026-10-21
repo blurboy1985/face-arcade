@@ -1,2 +1,5 @@
 # Local editor / Claude Code tooling
 .claude/
+
+# Wrangler local state
+.wrangler/

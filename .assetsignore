@@ -1,0 +1,10 @@
+# Only the website itself is uploaded to Cloudflare: ignore everything, then allow the site files.
+*
+!index.html
+!space.html
+!jump.html
+!pong.html
+!js/
+!js/*.js
+!css/
+!css/*.css
