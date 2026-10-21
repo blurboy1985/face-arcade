@@ -44,7 +44,7 @@ Webcam face-controlled browser games. A launcher lets the player choose 1 of 3 g
   sub-step; 200/200 stomps at 20 fps), double-stomp, solo face pick, preview cropping (object-fit contain),
   play() timeouts; plus Q = quit to menu in all games.
 - [ ] Real 2-person Pong + playing with an uncovered camera — needs the user.
-- [ ] Push to a new public GitHub repo (requested by user).
+- [x] Pushed to new public repo https://github.com/blurboy1985/face-arcade (branch main).
 
 ## Previous work (Face Pilot)
 - Done and verified; camera fix: Chrome lists LSVCam / AMD Privacy View / OBS Virtual (virtual) + UGREEN Camera 4K (real).
