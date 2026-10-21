@@ -70,6 +70,14 @@ Webcam face-controlled browser games. A launcher lets the player choose 1 of 3 g
   custom domain) on account daniel.tianwen@gmail.com, via `npx wrangler@4.148.0 deploy`.
   Uploaded exactly the 8 site files (allowlist `.assetsignore`); PLAN/README/config/.git return 404.
 
+## Fix: Face Jump can't reach the platforms (2026-10-21)
+- Cause: brick/? rows are 4.0 tiles above ground; max jump was 3.93 (jumpV 16, hold gravity 32).
+- Fix: jumpV 17.5, hold gravity 30 → full jump ~5 tiles, tap ~2.5.
+- Verify: land on every platform row (y=9 from ground, upper y=6 row from the y=9 row),
+  bot still clears the level, then redeploy Cloudflare + push.
+- [x] Held jump 5.03 tiles (face: mouth held open, same), tap 2.62. Landed on all 5 platform rows from the
+  ground and on the upper bridge floor; bot clears the level; screenshot shows Pip on the bricks.
+
 ## Previous work (Face Pilot)
 - Done and verified; camera fix: Chrome lists LSVCam / AMD Privacy View / OBS Virtual (virtual) + UGREEN Camera 4K (real).
   Auto mode ranks real cams first and skips black feeds. User's UGREEN image was black (shutter likely closed).

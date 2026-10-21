@@ -90,8 +90,10 @@ const CFG = {
   trapTime: 4,           // seconds a slime stays trapped in a bubble
   lives: 3,
 };
+// Full (held) jump rises ~5 tiles so the brick/? platforms 4 tiles above the ground are easy to land on;
+// a quick tap is a ~2.5-tile hop.
 const PHYS = {
-  gravity: 60, gravityHold: 32, jumpV: 16, maxFall: 22,
+  gravity: 60, gravityHold: 30, jumpV: 17.5, maxFall: 22,
   maxRun: 8, accelGround: 45, accelAir: 28, decelGround: 40, decelAir: 10,
   coyote: 0.1, jumpBuffer: 0.15,
 };
