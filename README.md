@@ -1,5 +1,7 @@
 # Face Arcade
 
+**▶ Play now: https://blurboy1985.github.io/face-arcade/** (Chrome or Edge, allow camera access)
+
 Three browser games you control with your **face** through a webcam. Face tracking runs locally in the browser with Google MediaPipe Face Landmarker — no video ever leaves your machine.
 
 | Game | Players | Face controls | Keyboard |
@@ -10,7 +12,7 @@ Three browser games you control with your **face** through a webcam. Face tracki
 
 Pick a game on the start screen (`index.html`).
 
-## Run
+## Run locally
 
 The webcam only works on `localhost` or HTTPS, so serve the folder rather than double-clicking a file:
 
