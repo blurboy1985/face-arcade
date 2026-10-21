@@ -57,6 +57,11 @@ const SFX = {
   wall:   ["square", 260, 260, 0.04, 0.03],
   score:  ["sine", 520, 260, 0.35, 0.1],
   win:    ["sine", 523, 1046, 0.6, 0.1],
+  shield: ["sine", 220, 880, 0.35, 0.09],
+  bounce: ["triangle", 500, 300, 0.08, 0.08],
+  bubble: ["sine", 300, 900, 0.18, 0.08],
+  pop:    ["square", 1200, 600, 0.07, 0.05],
+  curve:  ["sine", 900, 300, 0.3, 0.08],
 };
 
 // One shared AudioContext for sound effects and music (null if Web Audio is unavailable).

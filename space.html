@@ -14,7 +14,10 @@
     <div class="big">Score <span id="score">0</span></div>
     <div class="small">Best <span id="best">0</span> · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit</div>
   </div>
-  <div id="lives" class="hearts right"></div>
+  <div class="right">
+    <div id="lives" class="hearts"></div>
+    <div class="small">Shield <span id="shield-status">ready</span></div>
+  </div>
 </div>
 
 <div id="cam-panel" class="hidden">
@@ -22,14 +25,15 @@
     <video id="cam" playsinline muted></video>
     <canvas id="cam-overlay"></canvas>
   </div>
-  <div class="meter"><div id="mouth-fill" class="meter-fill"></div><div id="mouth-thresh" class="meter-thresh"></div></div>
-  <div class="cam-label"><span id="cam-name"></span> · mouth open → fire</div>
+  <div class="meter-row">mouth<div class="meter"><div id="mouth-fill" class="meter-fill"></div><div id="mouth-thresh" class="meter-thresh"></div></div></div>
+  <div class="meter-row">pucker<div class="meter"><div id="pucker-fill" class="meter-fill"></div><div id="pucker-thresh" class="meter-thresh"></div></div></div>
+  <div class="cam-label"><span id="cam-name"></span> · mouth → fire · pucker → shield</div>
 </div>
 
 <div id="menu" class="screen">
   <div class="card">
     <h1>Face Pilot</h1>
-    <p>Steer your ship by moving your head.<br>Open your mouth to fire lasers.<br>Dodge asteroids, grab the gold stars.</p>
+    <p>Steer your ship by moving your head.<br>Open your mouth to fire lasers.<br>Pucker your lips to blow a <b>shield bubble</b>.<br>Dodge asteroids, grab the gold stars.</p>
     <div class="btns">
       <button id="btn-face">Play with Face (webcam)</button>
       <button id="btn-keys" class="secondary">Play with Keyboard</button>
@@ -44,10 +48,12 @@
         <input id="sens" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
       <label>Mouth trigger level <span id="jaw-val">0.35</span>
         <input id="jaw" type="range" min="0.1" max="0.7" step="0.05" value="0.35"></label>
+      <label>Pucker trigger level <span id="pucker-val">0.35</span>
+        <input id="pucker" type="range" min="0.15" max="0.7" step="0.05" value="0.35"></label>
     </div>
     <div class="help">
-      Face: sit centered, hold still for a second to calibrate.<br>
-      Keyboard: <kbd>←↑↓→</kbd>/<kbd>WASD</kbd> move · <kbd>Space</kbd> fire<br>
+      Face: sit centered, relaxed, and hold still for a second to calibrate.<br>
+      Keyboard: <kbd>←↑↓→</kbd>/<kbd>WASD</kbd> move · <kbd>Space</kbd> fire · <kbd>X</kbd> shield<br>
       Video stays on your computer; nothing is uploaded.
     </div>
     <a class="back" href="index.html">← All games</a>
@@ -67,7 +73,7 @@
 
 <script type="module">
 import { $, rand, clamp, dist2, loadNum, saveStr, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
-import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay } from "./js/face.js";
+import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay, puckerLevel } from "./js/face.js";
 import { Music, SONGS, bindMusicToggle, setMusicEnabled, musicPrefs } from "./js/music.js";
 
 const view = fitCanvas($("game"));
@@ -80,10 +86,15 @@ const CFG = {
   jawThreshold: 0.35, // jawOpen blendshape score that fires
   fireCooldown: 0.16,
   lives: 3,
+  puckerThreshold: 0.35, // lip pucker above resting level that raises the shield
+  shieldTime: 2.5,
+  shieldCooldown: 8,     // counted from when the shield goes up
+  shieldR: 34,
 };
 let sensitivity = 1;
 $("sens").addEventListener("input", (e) => { sensitivity = +e.target.value; $("sens-val").textContent = sensitivity.toFixed(1) + "×"; });
 $("jaw").addEventListener("input", (e) => { CFG.jawThreshold = +e.target.value; $("jaw-val").textContent = CFG.jawThreshold.toFixed(2); });
+$("pucker").addEventListener("input", (e) => { CFG.puckerThreshold = +e.target.value; $("pucker-val").textContent = CFG.puckerThreshold.toFixed(2); });
 
 // ---------- Input ----------
 const keys = trackKeys((code) => {
@@ -102,7 +113,7 @@ const tracker = new FaceTracker(video, { numFaces: 1, cameraSelect: $("cam-selec
 const music = new Music(SONGS.pilot);
 bindMusicToggle($("music-toggle"));
 const calib = new Calibrator(15);
-const face = { present: false, nose: { x: 0.5, y: 0.5 }, jaw: 0 };
+const face = { present: false, nose: { x: 0.5, y: 0.5 }, jaw: 0, pucker: 0 };
 bindCameraSelect($("cam-select")).catch(() => {});
 
 function updateFace(now, dt) {
@@ -111,9 +122,11 @@ function updateFace(now, dt) {
   if (face.present) {
     face.nose = faces[0].nose;
     face.jaw = faces[0].jaw;
-    calib.feed(face.nose);
+    calib.feed(face.nose, faces[0].pucker);
+    face.pucker = puckerLevel(faces[0], calib.value);
   } else {
     face.jaw = 0;
+    face.pucker = 0;
   }
   drawCamOverlay(faces);
 }
@@ -144,6 +157,9 @@ function drawCamOverlay(faces) {
   $("mouth-fill").style.width = clamp(face.jaw / 0.8, 0, 1) * 100 + "%";
   $("mouth-fill").style.background = face.jaw > CFG.jawThreshold ? "#ff5ea8" : "#5ee0ff";
   $("mouth-thresh").style.left = clamp(CFG.jawThreshold / 0.8, 0, 1) * 100 + "%";
+  $("pucker-fill").style.width = clamp(face.pucker / 0.8, 0, 1) * 100 + "%";
+  $("pucker-fill").style.background = face.pucker > CFG.puckerThreshold ? "#ffd25e" : "#c58bff";
+  $("pucker-thresh").style.left = clamp(CFG.puckerThreshold / 0.8, 0, 1) * 100 + "%";
   $("cam-name").textContent = tracker.cameraLabel;
 }
 
@@ -151,7 +167,7 @@ function drawCamOverlay(faces) {
 const S = {
   mode: null, running: false, paused: false, over: false,
   t: 0, score: 0, best: loadNum("facePilotBest"), lives: CFG.lives, invuln: 0, fireCd: 0, shake: 0,
-  spawnAst: 1, spawnStar: 3, waiting: "",
+  spawnAst: 1, spawnStar: 3, waiting: "", shield: 0, shieldCd: 0, prevPucker: false,
   ship: { x: 0, y: 0, tilt: 0 },
   asteroids: [], stars: [], lasers: [], particles: [],
 };
@@ -162,7 +178,7 @@ window.facePilot = { S, music, face, calib, tracker, step: (dt = 1 / 60) => upda
 function startGame(mode) {
   Object.assign(S, {
     mode, running: true, paused: false, over: false, t: 0, score: 0, lives: CFG.lives,
-    invuln: 1.5, fireCd: 0, shake: 0, spawnAst: 1, spawnStar: 3,
+    invuln: 1.5, fireCd: 0, shake: 0, spawnAst: 1, spawnStar: 3, shield: 0, shieldCd: 0, prevPucker: false,
     asteroids: [], stars: [], lasers: [], particles: [],
   });
   S.ship.x = view.W / 2; S.ship.y = view.H * 0.72; S.ship.tilt = 0;
@@ -198,12 +214,14 @@ function showMenu() {
 
 let hudCache = "";
 function updateHud(force) {
-  const key = `${Math.floor(S.score)}|${S.lives}|${S.best}`;
+  const shield = S.shield > 0 ? "ON" : S.shieldCd > 0 ? `${Math.ceil(S.shieldCd)}s` : "ready";
+  const key = `${Math.floor(S.score)}|${S.lives}|${S.best}|${shield}`;
   if (!force && key === hudCache) return;
   hudCache = key;
   $("score").textContent = Math.floor(S.score);
   $("best").textContent = S.best;
   $("lives").textContent = "♥".repeat(Math.max(0, S.lives));
+  $("shield-status").textContent = shield;
 }
 
 function explode(x, y, color, n = 18, speed = 220) {
@@ -267,6 +285,17 @@ function update(dt) {
     sfx("laser");
   }
 
+  // Shield bubble: pucker (or X) raises it when it's off cooldown
+  const puckering = S.mode === "face" ? face.pucker > CFG.puckerThreshold : keys.has("KeyX");
+  if (puckering && !S.prevPucker && S.shieldCd <= 0) {
+    S.shield = CFG.shieldTime;
+    S.shieldCd = CFG.shieldCooldown;
+    sfx("shield");
+  }
+  S.prevPucker = puckering;
+  S.shield = Math.max(0, S.shield - dt);
+  S.shieldCd = Math.max(0, S.shieldCd - dt);
+
   // Spawning
   S.spawnAst -= dt;
   if (S.spawnAst <= 0) {
@@ -312,7 +341,22 @@ function update(dt) {
   // Ship vs asteroid / star
   const shipR = 14;
   for (const a of S.asteroids) {
-    if (!a.dead && S.invuln <= 0 && dist2(ship.x, ship.y, a.x, a.y) < (a.r * 0.85 + shipR) ** 2) {
+    if (a.dead) continue;
+    if (S.shield > 0) {
+      // Bounce asteroids off the bubble instead of taking damage
+      const reach = CFG.shieldR + a.r * 0.85;
+      if (dist2(ship.x, ship.y, a.x, a.y) < reach ** 2) {
+        const d = Math.hypot(a.x - ship.x, a.y - ship.y) || 1, nx = (a.x - ship.x) / d, ny = (a.y - ship.y) / d;
+        const sp = Math.max(260, Math.hypot(a.vx, a.vy));
+        a.vx = nx * sp; a.vy = ny * sp;
+        a.x = ship.x + nx * (reach + 1); a.y = ship.y + ny * (reach + 1);
+        S.score += 5;
+        explode(ship.x + nx * CFG.shieldR, ship.y + ny * CFG.shieldR, "#c58bff", 8, 140);
+        sfx("bounce");
+      }
+      continue;
+    }
+    if (S.invuln <= 0 && dist2(ship.x, ship.y, a.x, a.y) < (a.r * 0.85 + shipR) ** 2) {
       a.dead = true;
       S.lives--; S.invuln = 2; S.shake = 14;
       explode(ship.x, ship.y, "#ff5ea8", 30, 280);
@@ -331,7 +375,7 @@ function update(dt) {
 
   // Cleanup
   S.lasers = S.lasers.filter((l) => !l.dead && l.y > -20);
-  S.asteroids = S.asteroids.filter((a) => !a.dead && a.y < H + a.r + 10);
+  S.asteroids = S.asteroids.filter((a) => !a.dead && a.y < H + a.r + 10 && a.y > -a.r - 80); // bounced ones may fly off the top
   S.stars = S.stars.filter((s) => !s.dead && s.y < H + 30);
   updateHud();
 }
@@ -366,6 +410,7 @@ function render(now) {
   if (S.running && !(S.over && S.lives <= 0)) {
     const blink = S.invuln > 0 && Math.floor(now / 100) % 2 === 0;
     if (!blink) drawShip(S.ship, now);
+    if (S.shield > 0) drawShield(S.ship, now);
   }
 
   for (const p of S.particles) {
@@ -395,6 +440,18 @@ function drawShip(ship, now) {
   ctx.fillStyle = "#ff5ea8";
   ctx.beginPath(); ctx.arc(0, -4, 4, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
+}
+
+function drawShield(ship, now) {
+  if (S.shield < 0.6 && Math.floor(now / 80) % 2 === 0) return; // flicker as it runs out
+  const r = CFG.shieldR + Math.sin(now / 120) * 1.5;
+  const g = ctx.createRadialGradient(ship.x - r * 0.3, ship.y - r * 0.4, r * 0.1, ship.x, ship.y, r);
+  g.addColorStop(0, "rgba(255,255,255,0.35)");
+  g.addColorStop(0.6, "rgba(197,139,255,0.12)");
+  g.addColorStop(1, "rgba(94,224,255,0.35)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(ship.x, ship.y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "rgba(220,200,255,0.8)"; ctx.lineWidth = 2; ctx.stroke();
 }
 
 function drawAsteroid(a) {

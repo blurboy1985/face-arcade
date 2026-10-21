@@ -29,6 +29,9 @@ canvas#game { display: block; width: 100vw; height: 100vh; }
 .meter { margin-top: 6px; height: 10px; border-radius: 5px; background: rgba(255,255,255,0.12);
   position: relative; overflow: hidden; }
 .meter-fill { height: 100%; width: 0%; background: var(--accent); }
+.meter-row { display: grid; grid-template-columns: 52px 1fr; align-items: center; gap: 6px; margin-top: 6px;
+  font-size: 10px; color: var(--muted); }
+.meter-row .meter { margin-top: 0; }
 .meter-thresh { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--gold); }
 .cam-label { font-size: 11px; color: var(--muted); margin-top: 3px; text-align: right;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

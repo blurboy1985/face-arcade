@@ -209,8 +209,10 @@ export class FaceTracker {
         console.warn("Face detection failed for this frame", err);
       }
       this.faces = (res.faceLandmarks || []).map((pts, i) => {
-        const jaw = res.faceBlendshapes?.[i]?.categories.find((c) => c.categoryName === "jawOpen");
-        return { pts, nose: { x: pts[1].x, y: pts[1].y }, jaw: jaw ? jaw.score : 0 }; // landmark 1 = nose tip
+        const shapes = res.faceBlendshapes?.[i]?.categories || [];
+        const score = (name) => shapes.find((c) => c.categoryName === name)?.score ?? 0;
+        // landmark 1 = nose tip; jawOpen = mouth open; mouthPucker = "kiss" lips
+        return { pts, nose: { x: pts[1].x, y: pts[1].y }, jaw: score("jawOpen"), pucker: score("mouthPucker") };
       });
     }
     this.lostFor = this.faces.length ? 0 : this.lostFor + dt;
@@ -238,23 +240,29 @@ export class FaceTracker {
   }
 }
 
-// Averages the nose position over the first few frames to find a player's neutral pose.
+// Averages the nose position (and resting lip pucker) over the first few frames to find a
+// player's neutral pose.
 export class Calibrator {
   constructor(frames = 15) { this.frames = frames; this.reset(); }
   reset() { this.samples = []; this.value = null; }
-  feed(p) {
+  feed(p, pucker = 0) {
     if (this.value) return true;
-    this.samples.push({ x: p.x, y: p.y });
+    this.samples.push({ x: p.x, y: p.y, pucker });
     if (this.samples.length >= this.frames) {
-      const n = this.samples.length;
-      this.value = {
-        x: this.samples.reduce((s, q) => s + q.x, 0) / n,
-        y: this.samples.reduce((s, q) => s + q.y, 0) / n,
-      };
+      const n = this.samples.length, avg = (k) => this.samples.reduce((s, q) => s + q[k], 0) / n;
+      // Cap the resting pucker so someone puckering during calibration can't disable the action.
+      this.value = { x: avg("x"), y: avg("y"), pucker: Math.min(avg("pucker"), 0.3) };
       this.samples = [];
     }
     return !!this.value;
   }
+}
+
+// How far the lips are puckered beyond the player's resting level (0 = not at all).
+// An open mouth can't pucker, so it reads as 0 — that keeps "fire/jump" and "pucker" apart.
+export function puckerLevel(face, calibValue) {
+  if (!face || face.jaw > 0.3) return 0;
+  return Math.max(0, (face.pucker || 0) - (calibValue?.pucker ?? 0));
 }
 
 // Draws face landmarks on the camera-preview overlay canvas (raw coordinates; CSS mirrors it).

@@ -27,14 +27,15 @@
     <video id="cam" playsinline muted></video>
     <canvas id="cam-overlay"></canvas>
   </div>
-  <div class="meter"><div id="mouth-fill" class="meter-fill"></div><div id="mouth-thresh" class="meter-thresh"></div></div>
-  <div class="cam-label"><span id="cam-name"></span> · mouth open → jump</div>
+  <div class="meter-row">mouth<div class="meter"><div id="mouth-fill" class="meter-fill"></div><div id="mouth-thresh" class="meter-thresh"></div></div></div>
+  <div class="meter-row">pucker<div class="meter"><div id="pucker-fill" class="meter-fill"></div><div id="pucker-thresh" class="meter-thresh"></div></div></div>
+  <div class="cam-label"><span id="cam-name"></span> · mouth → jump · pucker → bubble</div>
 </div>
 
 <div id="menu" class="screen">
   <div class="card">
     <h1>Face Jump</h1>
-    <p>Run and jump to the flag!<br>Lean or turn your head left/right to run.<br>Open your mouth to jump — keep it open to jump higher.<br>Stomp slimes, bump <b>?</b> blocks, collect coins.</p>
+    <p>Run and jump to the flag!<br>Lean or turn your head left/right to run.<br>Open your mouth to jump — keep it open to jump higher.<br>Pucker your lips to blow a <b>bubble</b> that traps slimes — touch a trapped slime to pop it!<br>Stomp slimes, bump <b>?</b> blocks, collect coins.</p>
     <div class="btns">
       <button id="btn-face">Play with Face (webcam)</button>
       <button id="btn-keys" class="secondary">Play with Keyboard</button>
@@ -49,10 +50,12 @@
         <input id="sens" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
       <label>Mouth trigger level <span id="jaw-val">0.30</span>
         <input id="jaw" type="range" min="0.1" max="0.7" step="0.05" value="0.3"></label>
+      <label>Pucker trigger level <span id="pucker-val">0.35</span>
+        <input id="pucker" type="range" min="0.15" max="0.7" step="0.05" value="0.35"></label>
     </div>
     <div class="help">
-      Face: sit centered, hold still for a second to calibrate. Small head moves = stand still.<br>
-      Keyboard: <kbd>←→</kbd>/<kbd>AD</kbd> run · <kbd>Space</kbd>/<kbd>↑</kbd> jump (hold = higher)<br>
+      Face: sit centered, relaxed, and hold still for a second to calibrate. Small head moves = stand still.<br>
+      Keyboard: <kbd>←→</kbd>/<kbd>AD</kbd> run · <kbd>Space</kbd>/<kbd>↑</kbd> jump (hold = higher) · <kbd>X</kbd> bubble<br>
       Video stays on your computer; nothing is uploaded.
     </div>
     <a class="back" href="index.html">← All games</a>
@@ -72,7 +75,7 @@
 
 <script type="module">
 import { $, rand, clamp, loadNum, saveStr, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
-import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay } from "./js/face.js";
+import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay, puckerLevel } from "./js/face.js";
 import { Music, SONGS, bindMusicToggle, setMusicEnabled, musicPrefs } from "./js/music.js";
 
 const view = fitCanvas($("game"));
@@ -83,6 +86,8 @@ const CFG = {
   rangeX: 0.09,        // nose travel (fraction of video width) for full run speed
   deadzone: 0.2,       // fraction of the range that counts as "standing still"
   jawThreshold: 0.3,
+  puckerThreshold: 0.35, // lip pucker above resting level that blows a bubble
+  trapTime: 4,           // seconds a slime stays trapped in a bubble
   lives: 3,
 };
 const PHYS = {
@@ -94,6 +99,7 @@ const SOLID = new Set(["#", "B", "?", "U", "P", "S"]);
 let sensitivity = 1;
 $("sens").addEventListener("input", (e) => { sensitivity = +e.target.value; $("sens-val").textContent = sensitivity.toFixed(1) + "×"; });
 $("jaw").addEventListener("input", (e) => { CFG.jawThreshold = +e.target.value; $("jaw-val").textContent = CFG.jawThreshold.toFixed(2); });
+$("pucker").addEventListener("input", (e) => { CFG.puckerThreshold = +e.target.value; $("pucker-val").textContent = CFG.puckerThreshold.toFixed(2); });
 
 // ---------- Level ----------
 // '#' ground, 'B' brick, '?' coin block, 'U' used block, 'P' pipe, 'S' stone, 'o' coin, '.' air.
@@ -163,7 +169,7 @@ const tracker = new FaceTracker(video, { numFaces: 1, cameraSelect: $("cam-selec
 const music = new Music(SONGS.jump);
 bindMusicToggle($("music-toggle"));
 const calib = new Calibrator(15);
-const face = { present: false, nose: { x: 0.5, y: 0.5 }, jaw: 0 };
+const face = { present: false, nose: { x: 0.5, y: 0.5 }, jaw: 0, pucker: 0 };
 bindCameraSelect($("cam-select")).catch(() => {});
 
 function updateFace(now, dt) {
@@ -172,9 +178,11 @@ function updateFace(now, dt) {
   if (face.present) {
     face.nose = faces[0].nose;
     face.jaw = faces[0].jaw;
-    calib.feed(face.nose);
+    calib.feed(face.nose, faces[0].pucker);
+    face.pucker = puckerLevel(faces[0], calib.value);
   } else {
     face.jaw = 0;
+    face.pucker = 0;
   }
   drawCamOverlay(faces);
 }
@@ -206,6 +214,9 @@ function drawCamOverlay(faces) {
   $("mouth-fill").style.width = clamp(face.jaw / 0.8, 0, 1) * 100 + "%";
   $("mouth-fill").style.background = face.jaw > CFG.jawThreshold ? "#ff5ea8" : "#5ee0ff";
   $("mouth-thresh").style.left = clamp(CFG.jawThreshold / 0.8, 0, 1) * 100 + "%";
+  $("pucker-fill").style.width = clamp(face.pucker / 0.8, 0, 1) * 100 + "%";
+  $("pucker-fill").style.background = face.pucker > CFG.puckerThreshold ? "#ffd25e" : "#c58bff";
+  $("pucker-thresh").style.left = clamp(CFG.puckerThreshold / 0.8, 0, 1) * 100 + "%";
   $("cam-name").textContent = tracker.cameraLabel;
 }
 
@@ -214,7 +225,7 @@ const S = {
   mode: null, running: false, paused: false, over: false, won: false, waiting: "",
   level: null, P: null, enemies: [], pops: [], particles: [], bumps: new Map(),
   score: 0, coins: 0, lives: CFG.lives, time: 0, checkpoint: 2, invuln: 0, dying: 0, winTimer: 0,
-  jumpBuffer: 0, coyote: 0, prevJump: false, camX: 0, best: loadNum("faceJumpBest"),
+  jumpBuffer: 0, coyote: 0, prevJump: false, camX: 0, best: loadNum("faceJumpBest"), bubble: null, prevPucker: false,
 };
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
 window.faceJump = { S, music, face, calib, tracker, keys, step: (dt = 1 / 60) => { update(dt); render(performance.now()); } };
@@ -226,10 +237,10 @@ function startGame(mode) {
   Object.assign(S, {
     mode, running: true, paused: false, over: false, won: false, level,
     P: newPlayer(level.checkpoints[0]),
-    enemies: level.enemies.map((x) => ({ x, y: 12.1, w: 0.9, h: 0.9, vx: -2, vy: 0, active: false, squash: 0, flipped: false, dead: false })),
+    enemies: level.enemies.map((x) => ({ x, y: 12.1, w: 0.9, h: 0.9, vx: -2, vy: 0, active: false, squash: 0, flipped: false, dead: false, trapped: 0, rise: 0 })),
     pops: [], particles: [], bumps: new Map(),
     score: 0, coins: 0, lives: CFG.lives, time: 0, checkpoint: level.checkpoints[0], invuln: 1, dying: 0, winTimer: 0,
-    jumpBuffer: 0, coyote: 0, prevJump: false, camX: 0,
+    jumpBuffer: 0, coyote: 0, prevJump: false, camX: 0, bubble: null, prevPucker: false,
   });
   keys.clear();
   music.restart();
@@ -323,7 +334,7 @@ function bumpBlock(tx, ty) {
     S.bumps.set(`${tx},${ty}`, 0.15);
     // Knock out any slime standing on the bumped block.
     for (const e of S.enemies) {
-      if (e.active && !e.dead && !e.flipped && !e.squash && Math.abs(e.y + e.h - ty) < 0.2 && e.x < tx + 1 && e.x + e.w > tx) {
+      if (e.active && !e.dead && !e.flipped && !e.squash && !e.trapped && Math.abs(e.y + e.h - ty) < 0.2 && e.x < tx + 1 && e.x + e.w > tx) {
         e.flipped = true; e.vy = -8; S.score += 100; sfx("stomp");
       }
     }
@@ -352,6 +363,12 @@ function stepPlayer(h, run, held) {
 function stepEnemies(h) {
   for (const e of S.enemies) {
     if (!e.active || e.dead || e.squash) continue;
+    if (e.trapped) {
+      // Float up a little inside the bubble (stopping under blocks), then hover
+      const d = Math.min(e.rise, 1.5 * h);
+      if (d > 0 && !solidAt(Math.floor(e.x + e.w / 2), Math.floor(e.y - d))) { e.y -= d; e.rise -= d; } else e.rise = 0;
+      continue;
+    }
     if (e.flipped) { e.vy += PHYS.gravity * h; e.y += e.vy * h; if (e.y > S.level.LH + 2) e.dead = true; continue; }
     e.vy = Math.min(e.vy + PHYS.gravity * h, PHYS.maxFall);
     if (moveEntity(e, h)) e.vx = -e.vx;
@@ -365,6 +382,14 @@ function touchSlimes(prevBottom, held) {
   const P = S.P;
   for (const e of S.enemies) {
     if (!e.active || e.dead || e.squash || e.flipped || !overlaps(P, e)) continue;
+    if (e.trapped) { // touching a trapped slime pops the bubble and defeats it
+      e.dead = true;
+      S.score += 200;
+      burst(e.x + e.w / 2, e.y + e.h / 2, "#c58bff", 10, 5);
+      burst(e.x + e.w / 2, e.y + e.h / 2, "#d9f3ff", 10, 6);
+      sfx("pop");
+      continue;
+    }
     if (P.vy >= 0 && prevBottom <= e.y + 0.25) {
       e.squash = 0.4;
       P.vy = held ? -15 : -10;
@@ -395,6 +420,40 @@ function afterDeath() {
   S.jumpBuffer = 0;
   // Push back nearby slimes so the respawn isn't an instant hit.
   for (const e of S.enemies) if (!e.dead && Math.abs(e.x - S.checkpoint) < 4) { e.x = S.checkpoint + 8; e.vx = -2; }
+}
+
+// ---------- Bubble (pucker / X) ----------
+function blowBubble() {
+  const P = S.P;
+  S.bubble = { x: P.facing > 0 ? P.x + P.w + 0.15 : P.x - 0.15, y: P.y + P.h * 0.4, vx: P.facing * 10, life: 1.4, r: 0.4 };
+  sfx("bubble");
+}
+
+function updateBubble(dt) {
+  const b = S.bubble;
+  if (!b) return;
+  b.life -= dt;
+  b.vx *= Math.exp(-dt * 1.6);
+  b.x += b.vx * dt;
+  b.y -= (Math.abs(b.vx) < 3 ? 1.2 : 0.15) * dt; // drifts upward once it slows down
+  if (b.life <= 0 || solidAt(Math.floor(b.x), Math.floor(b.y))) {
+    burst(b.x, b.y, "#d9f3ff", 6, 3);
+    S.bubble = null;
+    sfx("pop");
+    return;
+  }
+  for (const e of S.enemies) {
+    if (!e.active || e.dead || e.squash || e.flipped || e.trapped) continue;
+    if (b.x > e.x - b.r && b.x < e.x + e.w + b.r && b.y > e.y - b.r && b.y < e.y + e.h + b.r) {
+      e.trapped = CFG.trapTime;
+      e.rise = 1.2;
+      e.vy = 0;
+      S.bubble = null;
+      S.score += 50;
+      sfx("bubble");
+      return;
+    }
+  }
 }
 
 function burst(x, y, color, n = 12, speed = 6) {
@@ -452,6 +511,9 @@ function update(dt) {
   }
   if (held && !S.prevJump) S.jumpBuffer = PHYS.jumpBuffer;
   S.prevJump = held;
+  const puckering = S.mode === "face" ? face.pucker > CFG.puckerThreshold : keys.has("KeyX");
+  if (puckering && !S.prevPucker && !S.bubble) blowBubble(); // one bubble at a time
+  S.prevPucker = puckering;
 
   // Wake up slimes just before they scroll into view
   const viewTiles = view.W / tileSize();
@@ -467,8 +529,13 @@ function update(dt) {
     if (touchSlimes(prevBottom, held)) return; // player died
   }
 
-  // Squashed slimes disappear after a moment
-  for (const e of S.enemies) if (e.squash) { e.squash -= dt; if (e.squash <= 0) e.dead = true; }
+  updateBubble(dt);
+
+  // Squashed slimes disappear after a moment; trapped ones break free when their bubble runs out
+  for (const e of S.enemies) {
+    if (e.squash) { e.squash -= dt; if (e.squash <= 0) e.dead = true; }
+    if (e.trapped) { e.trapped -= dt; if (e.trapped <= 0) { e.trapped = 0; e.vy = 0; } }
+  }
   S.enemies = S.enemies.filter((e) => !e.dead);
 
   // Coins
@@ -536,7 +603,14 @@ function render(now) {
   // Coin pop-ups from ? blocks
   for (const p of S.pops) drawCoin(p.x * T, p.y * T, T, sec * 3);
 
-  for (const e of S.enemies) if (e.active) drawSlime(e, T, sec);
+  for (const e of S.enemies) {
+    if (!e.active) continue;
+    drawSlime(e, T, sec);
+    if (e.trapped && !(e.trapped < 1 && Math.floor(sec * 8) % 2 === 0)) {
+      drawBubble((e.x + e.w / 2) * T, (e.y + e.h / 2) * T, T * 0.75, sec); // blinks just before it bursts
+    }
+  }
+  if (S.bubble) drawBubble(S.bubble.x * T, S.bubble.y * T, S.bubble.r * T, sec);
 
   if (S.P) {
     const blink = S.invuln > 0 && Math.floor(sec * 10) % 2 === 0;
@@ -702,6 +776,17 @@ function drawHero(P, T, sec) {
     ctx.beginPath(); ctx.arc(ex + dx * w + P.facing * w * 0.04, y + h * 0.43, w * 0.055, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
+}
+
+function drawBubble(cx, cy, r, sec) {
+  r *= 1 + Math.sin(sec * 6) * 0.04;
+  const g = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.05, cx, cy, r);
+  g.addColorStop(0, "rgba(255,255,255,0.75)");
+  g.addColorStop(0.35, "rgba(200,235,255,0.18)");
+  g.addColorStop(1, "rgba(150,200,255,0.45)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2; ctx.stroke();
 }
 
 // Slime: an original purple blob enemy.

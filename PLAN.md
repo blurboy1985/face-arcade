@@ -58,6 +58,16 @@ Webcam face-controlled browser games. A launcher lets the player choose 1 of 3 g
   RMS ~0.06–0.07 while playing, 0 when paused / after win / game over / muted (M) / on menu;
   N toggles + persists; rematch restarts at step 0; no console errors.
 
+## Third action: lip pucker (2026-10-21)
+- `face.js`: per-face `mouthPucker` score; Calibrator records resting pucker (capped 0.3);
+  `puckerLevel()` = pucker above resting level, 0 while mouth is open.
+- Pilot: pucker/X → shield bubble 2.5 s (asteroids bounce off), 8 s cooldown, HUD status.
+- Jump: pucker/X → bubble (one at a time) traps a slime 4 s; touch to pop (+200); escapes after.
+- Pong: pucker at impact (A / → on keyboard) → curve shot, once per player per rally; paddle glows purple.
+- Pucker meter + "Pucker trigger level" slider; launcher + README updated.
+- [x] Verified in Chrome via step(): all behaviours above, level still beatable by bot, no console errors.
+- [ ] Publish at face-arcade.danielquek.com on the user's Cloudflare (requested).
+
 ## Previous work (Face Pilot)
 - Done and verified; camera fix: Chrome lists LSVCam / AMD Privacy View / OBS Virtual (virtual) + UGREEN Camera 4K (real).
   Auto mode ranks real cams first and skips black feeds. User's UGREEN image was black (shutter likely closed).

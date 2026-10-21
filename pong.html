@@ -32,7 +32,7 @@
 <div id="menu" class="screen">
   <div class="card">
     <h1>Face Pong</h1>
-    <p>Two faces, one webcam. Sit side by side —<br><b class="p1">left player</b> moves the left paddle, <b class="p2">right player</b> the right one.<br>Move your head up/down to move your paddle.<br>Open your mouth as the ball hits your paddle for a <b>power shot</b>!</p>
+    <p>Two faces, one webcam. Sit side by side —<br><b class="p1">left player</b> moves the left paddle, <b class="p2">right player</b> the right one.<br>Move your head up/down to move your paddle.<br>Open your mouth as the ball hits your paddle for a <b>power shot</b>!<br>Pucker your lips as it hits for a <b>curve shot</b> (once per rally).</p>
     <div class="btns">
       <button id="btn-face2">2 Players — webcam (2 faces)</button>
       <button id="btn-cpu" class="secondary">1 Player vs Computer — webcam</button>
@@ -48,12 +48,14 @@
         <input id="sens" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
       <label>Mouth trigger level <span id="jaw-val">0.35</span>
         <input id="jaw" type="range" min="0.1" max="0.7" step="0.05" value="0.35"></label>
+      <label>Pucker trigger level <span id="pucker-val">0.35</span>
+        <input id="pucker" type="range" min="0.15" max="0.7" step="0.05" value="0.35"></label>
       <label>Points to win <span id="win-val">7</span>
         <input id="win" type="range" min="3" max="15" step="1" value="7"></label>
     </div>
     <div class="help">
-      Webcam: both players hold still for a second to calibrate. Sit far enough back that both faces fit in the preview.<br>
-      Keyboard: <span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> move, <kbd>D</kbd> power · <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> move, <kbd>←</kbd> power<br>
+      Webcam: both players relax and hold still for a second to calibrate. Sit far enough back that both faces fit in the preview.<br>
+      Keyboard: <span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> move, <kbd>D</kbd> power, <kbd>A</kbd> curve · <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> move, <kbd>←</kbd> power, <kbd>→</kbd> curve<br>
       Video stays on your computer; nothing is uploaded.
     </div>
     <a class="back" href="index.html">← All games</a>
@@ -73,7 +75,7 @@
 
 <script type="module">
 import { $, rand, clamp, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
-import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay } from "./js/face.js";
+import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay, puckerLevel } from "./js/face.js";
 import { Music, SONGS, bindMusicToggle, setMusicEnabled, musicPrefs } from "./js/music.js";
 
 const view = fitCanvas($("game"));
@@ -81,10 +83,16 @@ const ctx = view.ctx;
 const COLORS = ["#5ee0ff", "#ff5ea8"];
 
 // ---------- Settings ----------
-const CFG = { rangeY: 0.08, jawThreshold: 0.35, winScore: 7, lostGrace: 0.6 };
+const CFG = {
+  rangeY: 0.08, jawThreshold: 0.35, winScore: 7, lostGrace: 0.6,
+  puckerThreshold: 0.35, // lip pucker above resting level that arms a curve shot
+  curve: 1.8,            // sideways pull of a curve shot, in screen heights per second²
+};
+const CURVE_COLOR = "#c58bff";
 let sensitivity = 1;
 $("sens").addEventListener("input", (e) => { sensitivity = +e.target.value; $("sens-val").textContent = sensitivity.toFixed(1) + "×"; });
 $("jaw").addEventListener("input", (e) => { CFG.jawThreshold = +e.target.value; $("jaw-val").textContent = CFG.jawThreshold.toFixed(2); });
+$("pucker").addEventListener("input", (e) => { CFG.puckerThreshold = +e.target.value; $("pucker-val").textContent = CFG.puckerThreshold.toFixed(2); });
 $("win").addEventListener("input", (e) => { CFG.winScore = +e.target.value; $("win-val").textContent = CFG.winScore; });
 
 // ---------- Input ----------
@@ -130,9 +138,10 @@ function updateFaces(now, dt) {
     if (f) {
       p.present = true; p.lostFor = 0;
       p.nose = f.nose; p.jaw = f.jaw;
-      p.calib.feed(f.nose);
+      p.calib.feed(f.nose, f.pucker);
+      p.pucker = puckerLevel(f, p.calib.value);
     } else {
-      p.present = false; p.lostFor += dt; p.jaw = 0;
+      p.present = false; p.lostFor += dt; p.jaw = 0; p.pucker = 0;
     }
   });
   drawCamOverlay(assigned);
@@ -153,13 +162,13 @@ function drawCamOverlay(assigned) {
 
 // ---------- Game state ----------
 const newPlayer = (usesFace, cpu = false) => ({
-  y: 0, score: 0, usesFace, cpu, present: false, lostFor: 0, nose: { x: 0.5, y: 0.5 }, jaw: 0,
-  calib: new Calibrator(15), flash: 0,
+  y: 0, score: 0, usesFace, cpu, present: false, lostFor: 0, nose: { x: 0.5, y: 0.5 }, jaw: 0, pucker: 0,
+  calib: new Calibrator(15), flash: 0, curveUsed: false,
 });
 const S = {
   mode: null, running: false, paused: false, over: false, waiting: "",
   players: [newPlayer(false), newPlayer(false)],
-  ball: { x: 0, y: 0, vx: 0, vy: 0, r: 10, power: false, trail: [] },
+  ball: { x: 0, y: 0, vx: 0, vy: 0, r: 10, power: false, curve: 0, trail: [] },
   speed: 0, serveTimer: 0, serveDir: 1, message: "", particles: [], cpuErr: 0,
 };
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
@@ -182,13 +191,14 @@ function startGame(mode) {
   $("hud").classList.remove("hidden");
   $("cam-panel").classList.toggle("hidden", mode === "keys");
   $("hud-help").innerHTML = mode === "keys"
-    ? `<span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> · <kbd>D</kbd> power &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> · <kbd>←</kbd> power &nbsp;|&nbsp; <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`
-    : `Head up/down = paddle · mouth open at impact = power shot · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`;
+    ? `<span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> · <kbd>D</kbd> power · <kbd>A</kbd> curve &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> · <kbd>←</kbd> power · <kbd>→</kbd> curve &nbsp;|&nbsp; <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`
+    : `Head up/down = paddle · at impact: mouth open = power, pucker = curve · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`;
 }
 
 function serve(dir) {
   const b = S.ball;
-  b.x = view.W / 2; b.y = view.H / 2; b.vx = 0; b.vy = 0; b.power = false; b.trail = [];
+  b.x = view.W / 2; b.y = view.H / 2; b.vx = 0; b.vy = 0; b.power = false; b.curve = 0; b.trail = [];
+  S.players.forEach((p) => (p.curveUsed = false)); // one curve shot per player per rally
   S.speed = baseSpeed();
   S.serveDir = dir;
   S.serveTimer = 1.2;
@@ -302,6 +312,7 @@ function update(dt) {
 
   // Ball
   const prevX = b.x;
+  if (b.curve) b.vy = clamp(b.vy + b.curve * dt, -S.speed * 1.2, S.speed * 1.2); // curve shot bends the path
   b.x += b.vx * dt; b.y += b.vy * dt;
   b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 12) b.trail.shift();
   if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy); sfx("wall"); }
@@ -325,9 +336,14 @@ function update(dt) {
       b.vy = Math.sin(angle) * sp;
       b.x = edge - dir * b.r;
       b.power = power;
+      // Curve shot: pull against the ball's vertical direction so it bends back mid-flight
+      const curve = isCurving(i);
+      if (curve) p.curveUsed = true;
+      b.curve = curve ? -(Math.sign(b.vy) || (Math.random() < 0.5 ? -1 : 1)) * CFG.curve * H : 0;
       p.flash = 0.25;
-      burst(b.x, b.y, power ? "#ffd25e" : COLORS[i], power ? 26 : 10, power ? 320 : 180);
+      burst(b.x, b.y, power ? "#ffd25e" : curve ? CURVE_COLOR : COLORS[i], power || curve ? 26 : 10, power ? 320 : 180);
       sfx(power ? "power" : "paddle");
+      if (curve) sfx("curve");
     }
   }
 
@@ -341,6 +357,14 @@ function isPowering(i) {
   if (p.usesFace) return p.jaw > CFG.jawThreshold;
   if (p.cpu) return Math.random() < 0.15;
   return i === 0 ? keys.has("KeyD") : keys.has("ArrowLeft");
+}
+
+function isCurving(i) {
+  const p = S.players[i];
+  if (p.curveUsed) return false;
+  if (p.usesFace) return p.pucker > CFG.puckerThreshold;
+  if (p.cpu) return Math.random() < 0.12;
+  return i === 0 ? keys.has("KeyA") : keys.has("ArrowRight");
 }
 
 // ---------- Render ----------
@@ -366,27 +390,35 @@ function render() {
   ctx.fillStyle = "rgba(255,255,255,0.45)";
   ctx.fillText(playerName(0), W * 0.3, H * 0.06 - 18);
   ctx.fillText(playerName(1), W * 0.7, H * 0.06 - 18);
+  // curve shot availability for this rally
+  const scoreSize = Math.round(Math.min(W, H) * 0.12);
+  S.players.forEach((p, i) => {
+    ctx.fillStyle = p.curveUsed ? "rgba(255,255,255,0.2)" : "rgba(197,139,255,0.8)";
+    ctx.fillText(p.curveUsed ? "curve used" : "curve ready", W * (i === 0 ? 0.3 : 0.7), H * 0.06 + scoreSize + 6);
+  });
 
-  // paddles
+  // paddles: gold = power armed (mouth open), purple = curve armed (pucker)
   S.players.forEach((p, i) => {
     const x = i === 0 ? pad.inset - pad.w / 2 : W - pad.inset - pad.w / 2;
     const armed = isArmedVisual(i);
-    ctx.shadowColor = armed ? "#ffd25e" : COLORS[i];
+    const col = armed === "power" ? "#ffd25e" : armed === "curve" ? CURVE_COLOR : COLORS[i];
+    ctx.shadowColor = col;
     ctx.shadowBlur = armed ? 28 : 12 + p.flash * 60;
-    ctx.fillStyle = armed ? "#ffd25e" : COLORS[i];
+    ctx.fillStyle = col;
     roundRect(x, p.y - pad.h / 2, pad.w, pad.h, 7);
     ctx.shadowBlur = 0;
   });
 
-  // ball + trail
+  // ball + trail (gold = power shot, purple = curve shot)
+  const ballCol = b.power ? "#ffd25e" : b.curve ? CURVE_COLOR : "#ffffff";
   b.trail.forEach((t, k) => {
     ctx.globalAlpha = (k / b.trail.length) * 0.35;
-    ctx.fillStyle = b.power ? "#ffb35e" : "#ffffff";
+    ctx.fillStyle = b.power ? "#ffb35e" : ballCol;
     ctx.beginPath(); ctx.arc(t.x, t.y, b.r * (0.5 + k / b.trail.length / 2), 0, Math.PI * 2); ctx.fill();
   });
   ctx.globalAlpha = 1;
-  ctx.shadowColor = b.power ? "#ffb35e" : "#ffffff"; ctx.shadowBlur = b.power ? 30 : 12;
-  ctx.fillStyle = b.power ? "#ffd25e" : "#ffffff";
+  ctx.shadowColor = b.power ? "#ffb35e" : ballCol; ctx.shadowBlur = b.power || b.curve ? 30 : 12;
+  ctx.fillStyle = ballCol;
   ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
   ctx.shadowBlur = 0;
 
@@ -401,12 +433,14 @@ function render() {
   else if (S.serveTimer > 0) drawBanner(ctx, W, H, S.message || `Get ready… ${Math.ceil(S.serveTimer)}`, "#ffffff");
 }
 
-// Paddle glows gold while its player's mouth is open (power shot armed).
+// Which shot a player currently has armed: "power" (mouth open), "curve" (pucker) or "".
 function isArmedVisual(i) {
   const p = S.players[i];
-  if (p.usesFace) return p.jaw > CFG.jawThreshold;
-  if (p.cpu) return false;
-  return i === 0 ? keys.has("KeyD") : keys.has("ArrowLeft");
+  if (p.cpu) return "";
+  const power = p.usesFace ? p.jaw > CFG.jawThreshold : i === 0 ? keys.has("KeyD") : keys.has("ArrowLeft");
+  if (power) return "power";
+  const curve = p.usesFace ? p.pucker > CFG.puckerThreshold : i === 0 ? keys.has("KeyA") : keys.has("ArrowRight");
+  return curve && !p.curveUsed ? "curve" : "";
 }
 
 function roundRect(x, y, w, h, r) {
