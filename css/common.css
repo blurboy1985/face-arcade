@@ -1,0 +1,72 @@
+/* Shared look for Face Arcade pages. */
+:root {
+  --bg: #05060f;
+  --panel: rgba(10, 14, 32, 0.9);
+  --text: #e8ecff;
+  --muted: #8c95c4;
+  --accent: #5ee0ff;
+  --accent-2: #ff5ea8;
+  --gold: #ffd25e;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+canvas#game { display: block; width: 100vw; height: 100vh; }
+
+#hud { position: fixed; top: 12px; left: 16px; right: 16px; display: flex; justify-content: space-between;
+  pointer-events: none; font-weight: 600; text-shadow: 0 2px 6px #000; gap: 12px; }
+#hud .big { font-size: 22px; }
+#hud .small { font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 4px; }
+#hud .right { text-align: right; }
+.hearts { color: var(--accent-2); font-size: 22px; letter-spacing: 2px; }
+
+#cam-panel { position: fixed; right: 16px; bottom: 16px; width: 220px; }
+#cam-wrap { position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; overflow: hidden;
+  border: 2px solid rgba(94, 224, 255, 0.5); transform: scaleX(-1); background: #000; }
+/* contain (not cover) so the preview shows the whole tracked frame, edges included */
+#cam-wrap video, #cam-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+#cam-wrap video { opacity: 0.75; }
+.meter { margin-top: 6px; height: 10px; border-radius: 5px; background: rgba(255,255,255,0.12);
+  position: relative; overflow: hidden; }
+.meter-fill { height: 100%; width: 0%; background: var(--accent); }
+.meter-thresh { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--gold); }
+.cam-label { font-size: 11px; color: var(--muted); margin-top: 3px; text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(2, 3, 10, 0.55); padding: 16px; overflow-y: auto; }
+.card { background: var(--panel); border: 1px solid rgba(94, 224, 255, 0.25); border-radius: 16px;
+  padding: 28px; max-width: 460px; width: 100%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  margin: auto; }
+.card h1 { margin: 0 0 6px; font-size: 40px; letter-spacing: 1px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text;
+  background-clip: text; color: transparent; }
+.card h2 { margin: 0 0 8px; font-size: 30px; }
+.card p { color: var(--muted); margin: 8px 0 18px; line-height: 1.45; }
+.btns { display: flex; flex-direction: column; gap: 10px; }
+button, .btn { font: inherit; font-weight: 600; font-size: 16px; padding: 12px 18px; border-radius: 10px; border: 0;
+  cursor: pointer; color: #04101a; background: var(--accent); transition: transform 0.08s, filter 0.15s;
+  text-decoration: none; display: inline-block; text-align: center; }
+button:hover, .btn:hover { filter: brightness(1.1); }
+button:active, .btn:active { transform: scale(0.98); }
+button.secondary, .btn.secondary { background: rgba(255,255,255,0.1); color: var(--text); }
+button:disabled { opacity: 0.5; cursor: wait; }
+.back { display: inline-block; margin-top: 14px; color: var(--muted); font-size: 14px; text-decoration: none; }
+.back:hover { color: var(--text); }
+#status { min-height: 1.4em; margin: 14px 0 0; color: var(--gold); font-size: 14px; }
+#status.error { color: var(--accent-2); }
+.settings { margin-top: 18px; text-align: left; font-size: 13px; color: var(--muted); display: grid; gap: 10px; }
+.settings label { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+.settings input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.settings select { grid-column: 1 / -1; width: 100%; font: inherit; color: var(--text); background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 8px; padding: 6px 8px; }
+.settings select option { background: #10142a; }
+.help { margin-top: 16px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+kbd { background: rgba(255,255,255,0.12); border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+.hidden { display: none !important; }
+
+@media (max-width: 600px) {
+  #cam-panel { width: 140px; }
+  .card { padding: 20px; }
+  .card h1 { font-size: 32px; }
+}

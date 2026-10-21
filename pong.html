@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Face Pong</title>
+<link rel="stylesheet" href="css/common.css">
+<style>
+  #hud { justify-content: center; }
+  #hud .small { text-align: center; }
+  #cam-panel { left: 50%; right: auto; transform: translateX(-50%); width: 260px; }
+  .card h1 { background: linear-gradient(90deg, #5ee0ff, #ff5ea8); -webkit-background-clip: text; background-clip: text; }
+  .p1 { color: #5ee0ff; } .p2 { color: #ff5ea8; }
+  @media (max-width: 600px) { #cam-panel { width: 160px; } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="small" id="hud-help"></div>
+</div>
+
+<div id="cam-panel" class="hidden">
+  <div id="cam-wrap">
+    <video id="cam" playsinline muted></video>
+    <canvas id="cam-overlay"></canvas>
+  </div>
+  <div class="cam-label"><span id="cam-name"></span></div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="card">
+    <h1>Face Pong</h1>
+    <p>Two faces, one webcam. Sit side by side —<br><b class="p1">left player</b> moves the left paddle, <b class="p2">right player</b> the right one.<br>Move your head up/down to move your paddle.<br>Open your mouth as the ball hits your paddle for a <b>power shot</b>!</p>
+    <div class="btns">
+      <button id="btn-face2">2 Players — webcam (2 faces)</button>
+      <button id="btn-cpu" class="secondary">1 Player vs Computer — webcam</button>
+      <button id="btn-keys" class="secondary">2 Players — keyboard</button>
+    </div>
+    <div id="status"></div>
+    <div class="settings">
+      <label>Camera
+        <select id="cam-select"><option value="auto">Auto (skip virtual cameras)</option></select></label>
+      <label>Head sensitivity <span id="sens-val">1.0×</span>
+        <input id="sens" type="range" min="0.5" max="2.5" step="0.1" value="1"></label>
+      <label>Mouth trigger level <span id="jaw-val">0.35</span>
+        <input id="jaw" type="range" min="0.1" max="0.7" step="0.05" value="0.35"></label>
+      <label>Points to win <span id="win-val">7</span>
+        <input id="win" type="range" min="3" max="15" step="1" value="7"></label>
+    </div>
+    <div class="help">
+      Webcam: both players hold still for a second to calibrate. Sit far enough back that both faces fit in the preview.<br>
+      Keyboard: <span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> move, <kbd>D</kbd> power · <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> move, <kbd>←</kbd> power<br>
+      Video stays on your computer; nothing is uploaded.
+    </div>
+    <a class="back" href="index.html">← All games</a>
+  </div>
+</div>
+
+<div id="gameover" class="screen hidden">
+  <div class="card">
+    <h2 id="end-title">Player 1 wins!</h2>
+    <p id="end-text"></p>
+    <div class="btns">
+      <button id="btn-again">Rematch</button>
+      <button id="btn-menu" class="secondary">Menu</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { $, rand, clamp, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
+import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay } from "./js/face.js";
+
+const view = fitCanvas($("game"));
+const ctx = view.ctx;
+const COLORS = ["#5ee0ff", "#ff5ea8"];
+
+// ---------- Settings ----------
+const CFG = { rangeY: 0.08, jawThreshold: 0.35, winScore: 7, lostGrace: 0.6 };
+let sensitivity = 1;
+$("sens").addEventListener("input", (e) => { sensitivity = +e.target.value; $("sens-val").textContent = sensitivity.toFixed(1) + "×"; });
+$("jaw").addEventListener("input", (e) => { CFG.jawThreshold = +e.target.value; $("jaw-val").textContent = CFG.jawThreshold.toFixed(2); });
+$("win").addEventListener("input", (e) => { CFG.winScore = +e.target.value; $("win-val").textContent = CFG.winScore; });
+
+// ---------- Input ----------
+const keys = trackKeys((code) => {
+  if (code === "KeyC") S.players.forEach((p) => p.calib.reset());
+  if (code === "KeyP" || code === "Escape") { if (S.running && !S.over) S.paused = !S.paused; }
+  if (code === "KeyM") audio.muted = !audio.muted;
+  if (code === "KeyQ" && S.running) showMenu();
+  if ((code === "Enter" || code === "NumpadEnter") && S.over) startGame(S.mode);
+});
+
+// ---------- Face tracking ----------
+const video = $("cam");
+const camCtx = $("cam-overlay").getContext("2d");
+const tracker = new FaceTracker(video, { numFaces: 2, cameraSelect: $("cam-select"), onStatus: setStatus });
+bindCameraSelect($("cam-select")).catch(() => {});
+
+// Splits detected faces between the players by which side of the (mirrored) picture they are on.
+// Raw video x is un-mirrored, so the person on the LEFT of the screen has the LARGER raw x.
+function assignFaces(faces) {
+  if (S.mode === "cpu") {
+    // Solo: follow the largest (closest) face so a passer-by in the background can't take over.
+    const width = (f) => Math.abs(f.pts[454].x - f.pts[234].x); // cheek-to-cheek landmarks
+    return [faces.length ? faces.reduce((a, b) => (width(b) > width(a) ? b : a)) : null, null];
+  }
+  if (faces.length >= 2) {
+    const [a, b] = [...faces].sort((f, g) => g.nose.x - f.nose.x);
+    return [a, b];
+  }
+  if (faces.length === 1) return faces[0].nose.x > 0.5 ? [faces[0], null] : [null, faces[0]];
+  return [null, null];
+}
+
+function updateFaces(now, dt) {
+  const faces = tracker.update(now, dt);
+  const assigned = assignFaces(faces);
+  S.players.forEach((p, i) => {
+    if (!p.usesFace) return;
+    const f = assigned[i];
+    if (f) {
+      p.present = true; p.lostFor = 0;
+      p.nose = f.nose; p.jaw = f.jaw;
+      p.calib.feed(f.nose);
+    } else {
+      p.present = false; p.lostFor += dt; p.jaw = 0;
+    }
+  });
+  drawCamOverlay(assigned);
+}
+
+function drawCamOverlay(assigned) {
+  syncOverlay(camCtx.canvas, video);
+  const { width: w, height: h } = camCtx.canvas;
+  camCtx.clearRect(0, 0, w, h);
+  if (S.mode === "face2") {
+    camCtx.strokeStyle = "rgba(255,255,255,0.35)"; camCtx.setLineDash([8, 8]); camCtx.lineWidth = 2;
+    camCtx.beginPath(); camCtx.moveTo(w / 2, 0); camCtx.lineTo(w / 2, h); camCtx.stroke();
+    camCtx.setLineDash([]);
+  }
+  assigned.forEach((f, i) => { if (f) drawFaces(camCtx, [f], [COLORS[i] + "aa"]); });
+  $("cam-name").textContent = tracker.cameraLabel;
+}
+
+// ---------- Game state ----------
+const newPlayer = (usesFace, cpu = false) => ({
+  y: 0, score: 0, usesFace, cpu, present: false, lostFor: 0, nose: { x: 0.5, y: 0.5 }, jaw: 0,
+  calib: new Calibrator(15), flash: 0,
+});
+const S = {
+  mode: null, running: false, paused: false, over: false, waiting: "",
+  players: [newPlayer(false), newPlayer(false)],
+  ball: { x: 0, y: 0, vx: 0, vy: 0, r: 10, power: false, trail: [] },
+  speed: 0, serveTimer: 0, serveDir: 1, message: "", particles: [], cpuErr: 0,
+};
+// Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
+window.facePong = { S, tracker, keys, assignFaces, step: (dt = 1 / 60) => update(dt) };
+
+const paddle = () => ({ w: 14, h: clamp(view.H * 0.2, 70, 170), inset: Math.max(28, view.W * 0.04) });
+const baseSpeed = () => clamp(view.W * 0.45, 300, 700);
+
+function startGame(mode) {
+  S.mode = mode;
+  S.players = [newPlayer(mode !== "keys"), newPlayer(mode === "face2", mode === "cpu")];
+  S.players.forEach((p) => (p.y = view.H / 2));
+  Object.assign(S, { running: true, paused: false, over: false, particles: [], message: "" });
+  serve(Math.random() < 0.5 ? -1 : 1);
+  keys.clear();
+  unlockAudio();
+  $("menu").classList.add("hidden");
+  $("gameover").classList.add("hidden");
+  $("hud").classList.remove("hidden");
+  $("cam-panel").classList.toggle("hidden", mode === "keys");
+  $("hud-help").innerHTML = mode === "keys"
+    ? `<span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> · <kbd>D</kbd> power &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> · <kbd>←</kbd> power &nbsp;|&nbsp; <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>Q</kbd> quit`
+    : `Head up/down = paddle · mouth open at impact = power shot · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>Q</kbd> quit`;
+}
+
+function serve(dir) {
+  const b = S.ball;
+  b.x = view.W / 2; b.y = view.H / 2; b.vx = 0; b.vy = 0; b.power = false; b.trail = [];
+  S.speed = baseSpeed();
+  S.serveDir = dir;
+  S.serveTimer = 1.2;
+}
+
+function launch() {
+  const a = rand(-0.5, 0.5);
+  S.ball.vx = Math.cos(a) * S.speed * S.serveDir;
+  S.ball.vy = Math.sin(a) * S.speed;
+}
+
+function playerName(i) {
+  if (S.mode === "cpu") return i === 0 ? "You" : "Computer";
+  return `Player ${i + 1}`;
+}
+
+function pointTo(i) {
+  const p = S.players[i];
+  p.score++;
+  sfx("score");
+  burst(S.ball.x, S.ball.y, COLORS[i], 30, 300);
+  if (p.score >= CFG.winScore) {
+    S.over = true;
+    sfx("win");
+    const won = playerName(i);
+    $("end-title").textContent = S.mode === "cpu" ? (i === 0 ? "You win! 🎉" : "Computer wins") : `${won} wins! 🎉`;
+    $("end-title").className = i === 0 ? "p1" : "p2";
+    $("end-text").innerHTML = `<span class="p1">${S.players[0].score}</span> : <span class="p2">${S.players[1].score}</span>`;
+    setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, 600);
+    return;
+  }
+  S.message = `${playerName(i)} scores!`;
+  serve(i === 0 ? 1 : -1); // serve toward the player who conceded
+}
+
+function showMenu() {
+  S.running = false; S.over = false;
+  tracker.stop();
+  $("gameover").classList.add("hidden");
+  $("hud").classList.add("hidden");
+  $("cam-panel").classList.add("hidden");
+  $("menu").classList.remove("hidden");
+  setStatus("");
+}
+
+function burst(x, y, color, n = 14, speed = 220) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = rand(0.2, 1) * speed;
+    S.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.7), max: 0.7, color });
+  }
+}
+
+// ---------- Update ----------
+function waitingReason() {
+  if (S.paused) return "Paused — press P";
+  if (S.mode === "keys") return "";
+  const faceP = S.players.map((p, i) => ({ p, i })).filter(({ p }) => p.usesFace);
+  const lost = faceP.filter(({ p }) => p.lostFor > CFG.lostGrace);
+  if (lost.length === faceP.length && tracker.dark) return tracker.lostMessage();
+  if (lost.length === 2) return "Both players: look at the camera (sit side by side)";
+  if (lost.length === 1) {
+    const i = lost[0].i;
+    return S.mode === "cpu" ? tracker.lostMessage() : `${playerName(i)} (${i === 0 ? "left" : "right"}): face not found`;
+  }
+  const uncal = faceP.filter(({ p }) => !p.calib.value);
+  if (uncal.length) return uncal.length === 2 ? "Both players: hold still… calibrating" : `${playerName(uncal[0].i)}: hold still… calibrating`;
+  return "";
+}
+
+function update(dt) {
+  for (const p of S.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt; }
+  S.particles = S.particles.filter((p) => p.life > 0);
+
+  S.waiting = "";
+  if (!S.running || S.over) return;
+  S.waiting = waitingReason();
+  if (S.waiting) return;
+
+  const { W, H } = view, pad = paddle(), b = S.ball;
+  const half = pad.h / 2, minY = half + 6, maxY = H - half - 6;
+
+  // Paddles
+  S.players.forEach((p, i) => {
+    p.flash = Math.max(0, p.flash - dt);
+    if (p.usesFace) {
+      const c = p.calib.value;
+      const ay = clamp(((p.nose.y - c.y) / CFG.rangeY) * sensitivity, -1, 1);
+      const target = H / 2 + ay * (H / 2 - half - 6);
+      p.y += (target - p.y) * (1 - Math.exp(-dt * 14));
+    } else if (p.cpu) {
+      // Follows the ball when it is coming, with a small aiming error; drifts to the middle otherwise.
+      const coming = b.vx > 0;
+      if (coming && Math.random() < dt * 2) S.cpuErr = rand(-half * 0.8, half * 0.8);
+      const target = coming ? b.y + S.cpuErr : H / 2;
+      const maxV = H * 0.95;
+      p.y += clamp(target - p.y, -maxV * dt, maxV * dt);
+    } else {
+      const up = i === 0 ? keys.has("KeyW") : keys.has("ArrowUp");
+      const down = i === 0 ? keys.has("KeyS") : keys.has("ArrowDown");
+      p.y += (down - up) * H * 1.1 * dt;
+    }
+    p.y = clamp(p.y, minY, maxY);
+  });
+
+  // Serve countdown
+  if (S.serveTimer > 0) {
+    S.serveTimer -= dt;
+    if (S.serveTimer <= 0) { S.message = ""; launch(); }
+    return;
+  }
+
+  // Ball
+  const prevX = b.x;
+  b.x += b.vx * dt; b.y += b.vy * dt;
+  b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 12) b.trail.shift();
+  if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy); sfx("wall"); }
+  if (b.y > H - b.r) { b.y = H - b.r; b.vy = -Math.abs(b.vy); sfx("wall"); }
+
+  // Paddle hits (checks the crossing so a fast ball can't tunnel through)
+  const faces = [pad.inset + pad.w / 2, W - pad.inset - pad.w / 2]; // inner face x of each paddle
+  for (const i of [0, 1]) {
+    const dir = i === 0 ? -1 : 1; // ball direction that approaches this paddle
+    if (Math.sign(b.vx) !== dir) continue;
+    const edge = faces[i];
+    const crossed = i === 0 ? prevX - b.r >= edge && b.x - b.r <= edge : prevX + b.r <= edge && b.x + b.r >= edge;
+    const p = S.players[i];
+    if (crossed && Math.abs(b.y - p.y) <= half + b.r) {
+      const rel = clamp((b.y - p.y) / half, -1, 1);
+      const angle = rel * (Math.PI / 3);
+      S.speed = Math.min(S.speed * 1.06, W * 1.3);
+      const power = isPowering(i);
+      const sp = S.speed * (power ? 1.45 : 1);
+      b.vx = -dir * Math.cos(angle) * sp;
+      b.vy = Math.sin(angle) * sp;
+      b.x = edge - dir * b.r;
+      b.power = power;
+      p.flash = 0.25;
+      burst(b.x, b.y, power ? "#ffd25e" : COLORS[i], power ? 26 : 10, power ? 320 : 180);
+      sfx(power ? "power" : "paddle");
+    }
+  }
+
+  // Points
+  if (b.x < -b.r * 2) pointTo(1);
+  else if (b.x > W + b.r * 2) pointTo(0);
+}
+
+function isPowering(i) {
+  const p = S.players[i];
+  if (p.usesFace) return p.jaw > CFG.jawThreshold;
+  if (p.cpu) return Math.random() < 0.15;
+  return i === 0 ? keys.has("KeyD") : keys.has("ArrowLeft");
+}
+
+// ---------- Render ----------
+function render() {
+  const { W, H } = view;
+  ctx.fillStyle = "#070a18";
+  ctx.fillRect(0, 0, W, H);
+  // court
+  ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 4; ctx.setLineDash([16, 18]);
+  ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = "rgba(255,255,255,0.08)"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.12, 0, Math.PI * 2); ctx.stroke();
+
+  if (!S.running) return;
+  const pad = paddle(), b = S.ball;
+
+  // scores
+  ctx.font = `700 ${Math.round(Math.min(W, H) * 0.12)}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(94,224,255,0.35)"; ctx.fillText(S.players[0].score, W * 0.3, H * 0.06);
+  ctx.fillStyle = "rgba(255,94,168,0.35)"; ctx.fillText(S.players[1].score, W * 0.7, H * 0.06);
+  ctx.font = `600 13px system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.fillText(playerName(0), W * 0.3, H * 0.06 - 18);
+  ctx.fillText(playerName(1), W * 0.7, H * 0.06 - 18);
+
+  // paddles
+  S.players.forEach((p, i) => {
+    const x = i === 0 ? pad.inset - pad.w / 2 : W - pad.inset - pad.w / 2;
+    const armed = isArmedVisual(i);
+    ctx.shadowColor = armed ? "#ffd25e" : COLORS[i];
+    ctx.shadowBlur = armed ? 28 : 12 + p.flash * 60;
+    ctx.fillStyle = armed ? "#ffd25e" : COLORS[i];
+    roundRect(x, p.y - pad.h / 2, pad.w, pad.h, 7);
+    ctx.shadowBlur = 0;
+  });
+
+  // ball + trail
+  b.trail.forEach((t, k) => {
+    ctx.globalAlpha = (k / b.trail.length) * 0.35;
+    ctx.fillStyle = b.power ? "#ffb35e" : "#ffffff";
+    ctx.beginPath(); ctx.arc(t.x, t.y, b.r * (0.5 + k / b.trail.length / 2), 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  ctx.shadowColor = b.power ? "#ffb35e" : "#ffffff"; ctx.shadowBlur = b.power ? 30 : 12;
+  ctx.fillStyle = b.power ? "#ffd25e" : "#ffffff";
+  ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  for (const p of S.particles) {
+    ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+
+  if (S.waiting) drawBanner(ctx, W, H, S.waiting);
+  else if (S.serveTimer > 0) drawBanner(ctx, W, H, S.message || `Get ready… ${Math.ceil(S.serveTimer)}`, "#ffffff");
+}
+
+// Paddle glows gold while its player's mouth is open (power shot armed).
+function isArmedVisual(i) {
+  const p = S.players[i];
+  if (p.usesFace) return p.jaw > CFG.jawThreshold;
+  if (p.cpu) return false;
+  return i === 0 ? keys.has("KeyD") : keys.has("ArrowLeft");
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fill();
+}
+
+// ---------- Main loop ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);
+  if (dt <= 0) { requestAnimationFrame(frame); return; }
+  last = now;
+  if (S.running && S.mode !== "keys") updateFaces(now, dt);
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------- Menu wiring ----------
+function setStatus(msg, isError = false) {
+  const el = $("status");
+  el.textContent = msg;
+  el.classList.toggle("error", isError);
+}
+
+const menuBtns = [$("btn-face2"), $("btn-cpu"), $("btn-keys")];
+async function startWithCamera(mode) {
+  menuBtns.forEach((b) => (b.disabled = true));
+  unlockAudio();
+  try {
+    await tracker.start();
+    startGame(mode);
+  } catch (err) {
+    console.error(err);
+    setStatus(cameraErrorMessage(err), true);
+  } finally {
+    menuBtns.forEach((b) => (b.disabled = false));
+  }
+}
+$("btn-face2").addEventListener("click", () => startWithCamera("face2"));
+$("btn-cpu").addEventListener("click", () => startWithCamera("cpu"));
+$("btn-keys").addEventListener("click", () => { tracker.stop(); startGame("keys"); });
+$("btn-again").addEventListener("click", () => startGame(S.mode));
+$("btn-menu").addEventListener("click", showMenu);
+</script>
+</body>
+</html>

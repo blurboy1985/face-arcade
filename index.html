@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Face Arcade</title>
+<link rel="stylesheet" href="css/common.css">
+<style>
+  html, body { overflow: auto; }
+  body {
+    min-height: 100%;
+    background:
+      radial-gradient(1200px 600px at 20% -10%, rgba(94,224,255,0.14), transparent 60%),
+      radial-gradient(900px 500px at 110% 10%, rgba(255,94,168,0.14), transparent 60%),
+      var(--bg);
+  }
+  main { max-width: 1080px; margin: 0 auto; padding: 48px 16px 40px; }
+  header { text-align: center; margin-bottom: 36px; }
+  header h1 { margin: 0; font-size: clamp(40px, 7vw, 64px); letter-spacing: 1px;
+    background: linear-gradient(90deg, var(--accent), var(--gold), var(--accent-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header p { color: var(--muted); margin: 10px auto 0; max-width: 560px; line-height: 1.5; }
+
+  .games { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+  .game { display: flex; flex-direction: column; text-decoration: none; color: var(--text);
+    background: var(--panel); border: 1px solid rgba(255,255,255,0.1); border-radius: 18px; overflow: hidden;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s; }
+  .game:hover, .game:focus-visible { transform: translateY(-4px); border-color: var(--c);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px var(--c); outline: none; }
+  .game svg { display: block; width: 100%; height: auto; }
+  .body { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+  .title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .title h2 { margin: 0; font-size: 24px; }
+  .badge { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px;
+    background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); white-space: nowrap; }
+  .desc { color: var(--muted); margin: 0; line-height: 1.45; font-size: 14px; }
+  .controls { list-style: none; padding: 0; margin: 0; font-size: 13px; display: grid; gap: 4px; }
+  .controls b { color: var(--text); }
+  .play { margin-top: auto; padding-top: 6px; font-weight: 700; color: var(--c); }
+
+  .tips { margin-top: 32px; color: var(--muted); font-size: 13px; line-height: 1.7; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Face Arcade</h1>
+    <p>Three games you play with your face. Grab a webcam, pick a game, and use your head and mouth as the controller.</p>
+  </header>
+
+  <section class="games">
+    <a class="game" href="space.html" style="--c: #5ee0ff">
+      <svg viewBox="0 0 320 170" aria-hidden="true">
+        <rect width="320" height="170" fill="#05060f"/>
+        <g fill="#c8d2ff" opacity="0.7"><circle cx="30" cy="20" r="1.5"/><circle cx="90" cy="60" r="1"/><circle cx="250" cy="30" r="1.5"/><circle cx="290" cy="110" r="1"/><circle cx="60" cy="130" r="1.2"/><circle cx="200" cy="140" r="1"/><circle cx="150" cy="15" r="1"/></g>
+        <polygon points="230,40 252,34 266,50 260,72 238,76 224,60" fill="#4a3d33" stroke="#c9a27a" stroke-width="2"/>
+        <polygon points="80,30 96,26 104,40 96,52 80,50" fill="#4a3d33" stroke="#c9a27a" stroke-width="2"/>
+        <path d="M268 100 l4 9 10 1 -8 6 3 10 -9 -6 -9 6 3 -10 -8 -6 10 -1z" fill="#ffd25e"/>
+        <rect x="157" y="62" width="3" height="14" fill="#5ee0ff"/><rect x="171" y="62" width="3" height="14" fill="#5ee0ff"/>
+        <rect x="157" y="92" width="3" height="14" fill="#5ee0ff"/><rect x="171" y="92" width="3" height="14" fill="#5ee0ff"/>
+        <polygon points="165,112 181,148 165,142 149,148" fill="#dff8ff"/>
+        <circle cx="165" cy="130" r="4" fill="#ff5ea8"/>
+        <polygon points="159,150 165,162 171,150" fill="#ffb35e"/>
+      </svg>
+      <div class="body">
+        <div class="title"><h2>Face Pilot</h2><span class="badge">1 player</span></div>
+        <p class="desc">Space shooter. Dodge asteroids, blast them apart and grab gold stars.</p>
+        <ul class="controls">
+          <li><b>Move head</b> → steer the ship</li>
+          <li><b>Open mouth</b> → fire lasers</li>
+        </ul>
+        <span class="play">Play →</span>
+      </div>
+    </a>
+
+    <a class="game" href="jump.html" style="--c: #ffb347">
+      <svg viewBox="0 0 320 170" aria-hidden="true">
+        <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5aa9ff"/><stop offset="1" stop-color="#bfe6ff"/></linearGradient></defs>
+        <rect width="320" height="170" fill="url(#sky)"/>
+        <g fill="#fff"><circle cx="60" cy="35" r="12"/><circle cx="75" cy="30" r="15"/><circle cx="90" cy="36" r="11"/></g>
+        <ellipse cx="250" cy="140" rx="70" ry="45" fill="#5cbf68"/>
+        <rect y="140" width="320" height="30" fill="#9a5b2c"/><rect y="140" width="320" height="7" fill="#3fb24a"/>
+        <rect x="120" y="70" width="24" height="24" fill="#c0622f"/><rect x="144" y="70" width="24" height="24" fill="#f2b632" stroke="#8a5a00" stroke-width="2"/><rect x="168" y="70" width="24" height="24" fill="#c0622f"/>
+        <text x="156" y="89" text-anchor="middle" font-family="system-ui" font-weight="700" font-size="18" fill="#fff6d6">?</text>
+        <ellipse cx="156" cy="56" rx="5" ry="9" fill="#ffd25e" stroke="#b8860b" stroke-width="2"/>
+        <rect x="250" y="100" width="40" height="40" fill="#2f9e44"/><rect x="246" y="96" width="48" height="14" fill="#2f9e44" stroke="#1a5c28" stroke-width="2"/>
+        <path d="M200 140 q2 -20 14 -20 q12 0 14 20z" fill="#8e44ad"/><circle cx="209" cy="130" r="3" fill="#fff"/><circle cx="219" cy="130" r="3" fill="#fff"/>
+        <g transform="translate(60 100)">
+          <ellipse cx="14" cy="22" rx="16" ry="18" fill="#ff7a3d"/><ellipse cx="14" cy="28" rx="9" ry="8" fill="#ffd3b0"/>
+          <rect x="-2" y="8" width="32" height="5" fill="#2d6cdf"/><path d="M-2 10 l-10 -4 2 9z" fill="#2d6cdf"/>
+          <circle cx="12" cy="18" r="4" fill="#fff"/><circle cx="21" cy="18" r="4" fill="#fff"/><circle cx="13.5" cy="18.5" r="2" fill="#111"/><circle cx="22.5" cy="18.5" r="2" fill="#111"/>
+        </g>
+      </svg>
+      <div class="body">
+        <div class="title"><h2>Face Jump</h2><span class="badge">1 player</span></div>
+        <p class="desc">Mario-style platformer. Run, stomp slimes, bump ? blocks for coins and reach the flag.</p>
+        <ul class="controls">
+          <li><b>Lean / turn head</b> → run left or right</li>
+          <li><b>Open mouth</b> → jump (keep open = higher)</li>
+        </ul>
+        <span class="play">Play →</span>
+      </div>
+    </a>
+
+    <a class="game" href="pong.html" style="--c: #ff5ea8">
+      <svg viewBox="0 0 320 170" aria-hidden="true">
+        <rect width="320" height="170" fill="#070a18"/>
+        <line x1="160" y1="0" x2="160" y2="170" stroke="rgba(255,255,255,0.18)" stroke-width="3" stroke-dasharray="10 10"/>
+        <text x="110" y="45" text-anchor="middle" font-family="system-ui" font-weight="700" font-size="34" fill="rgba(94,224,255,0.4)">4</text>
+        <text x="210" y="45" text-anchor="middle" font-family="system-ui" font-weight="700" font-size="34" fill="rgba(255,94,168,0.4)">3</text>
+        <rect x="22" y="70" width="10" height="50" rx="5" fill="#5ee0ff"/>
+        <rect x="288" y="40" width="10" height="50" rx="5" fill="#ffd25e"/>
+        <circle cx="120" cy="105" r="3" fill="#ffd25e" opacity="0.3"/><circle cx="160" cy="95" r="5" fill="#ffd25e" opacity="0.5"/>
+        <circle cx="200" cy="85" r="8" fill="#ffd25e"/>
+        <g transform="translate(95 125)" fill="none" stroke-width="2.5"><circle cx="0" cy="0" r="14" stroke="#5ee0ff"/><circle cx="-5" cy="-3" r="1.5" fill="#5ee0ff"/><circle cx="5" cy="-3" r="1.5" fill="#5ee0ff"/><path d="M-5 5 q5 4 10 0" stroke="#5ee0ff"/></g>
+        <g transform="translate(225 125)" fill="none" stroke-width="2.5"><circle cx="0" cy="0" r="14" stroke="#ff5ea8"/><circle cx="-5" cy="-3" r="1.5" fill="#ff5ea8"/><circle cx="5" cy="-3" r="1.5" fill="#ff5ea8"/><ellipse cx="0" cy="6" rx="4" ry="5" stroke="#ff5ea8"/></g>
+      </svg>
+      <div class="body">
+        <div class="title"><h2>Face Pong</h2><span class="badge">2 players</span></div>
+        <p class="desc">Head-to-head pong with two faces on one webcam — or solo against the computer.</p>
+        <ul class="controls">
+          <li><b>Move head up / down</b> → move your paddle</li>
+          <li><b>Open mouth at impact</b> → power shot</li>
+        </ul>
+        <span class="play">Play →</span>
+      </div>
+    </a>
+  </section>
+
+  <p class="tips">
+    Works best in Chrome or Edge with good lighting. Every game also has a keyboard mode.<br>
+    Face tracking runs entirely in your browser — no video is uploaded.
+  </p>
+</main>
+</body>
+</html>
