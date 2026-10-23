@@ -201,3 +201,6 @@ difficulty numbers rising, no console errors; Face Jump: a scripted bot can fini
   - Hockey: all bosses play to the end, puck never stalls (was: Goalie Giant left slow pucks dead → fixed);
     bot results per boss (3 games): Rookie 3/3, Goalie Giant 1/3, Speedster 2/3, Twin Mallets 0/3,
     Iron Golem 0/3 → reordered + softened; powers, guard, orb, retry/champion flows OK.
+- [x] PR https://github.com/blurboy1985/face-arcade/pull/3 merged; deployed (wrangler version c19ebde1) — live site
+  serves all 5 games with their new bosses, no console errors.
+- [ ] Real webcam play of the new content — needs the user.
