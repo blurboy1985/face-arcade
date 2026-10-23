@@ -187,3 +187,17 @@ power orbs (big mallet, multi-puck, freeze opponent, goal guard). Slightly bigge
 
 Verify each with its debug hook: stage/opponent progression and end screens, each boss behaviour, each power,
 difficulty numbers rising, no console errors; Face Jump: a scripted bot can finish every world (reachability).
+- [x] Verified via debug hooks (keyboard/injected input), 1280×720 + narrow pane, no console errors on any page:
+  - Pilot: full run sector 1→5 → "Galaxy saved!"; fighters from s2, mines from s4; boss shots 2→125 per fight;
+    spread=4 lasers, rapid cd 0.08, mega, life, smart bomb clears; shield blocks shots; mine → 8 shots;
+    capsule magnet; laser hits 6 px past an edge, misses at 9 px.
+  - Jump: bot clears all 4 worlds' terrain with 0 deaths (31–37 s each); King Slime 3 stomps → gate opens →
+    flag → next world (score/lives kept); Spike Shell: spiky stomp kills, bubble stun + dizzy allow stomps;
+    Bat Baron dives & stompable; Lava Golem fireballs; star hurts boss; ? block → feather → double jump;
+    world 4 → "All worlds clear!". (Bot initially failed W1 by over-jumping a stair — bot fix, level unchanged.)
+  - Pong: perfect-P1 bot wins tournament (45/78/56/32/26 s per boss) → champion; loss → retry same boss;
+    big paddle 170→272, freeze, multi-ball 3, guard saves, orb → last hitter, walls bounce, Omega shrinks 289→207.
+    Fixed: CPU aim error never missed (Rookie took 530 s) → errors >1 so bosses can be beaten.
+  - Hockey: all bosses play to the end, puck never stalls (was: Goalie Giant left slow pucks dead → fixed);
+    bot results per boss (3 games): Rookie 3/3, Goalie Giant 1/3, Speedster 2/3, Twin Mallets 0/3,
+    Iron Golem 0/3 → reordered + softened; powers, guard, orb, retry/champion flows OK.
