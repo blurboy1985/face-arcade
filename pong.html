@@ -32,10 +32,12 @@
 <div id="menu" class="screen">
   <div class="card">
     <h1>Face Pong</h1>
-    <p>Two faces, one webcam. Sit side by side —<br><b class="p1">left player</b> moves the left paddle, <b class="p2">right player</b> the right one.<br>Move your head up/down to move your paddle.<br>Open your mouth as the ball hits your paddle for a <b>power shot</b>!<br>Pucker your lips as it hits for a <b>curve shot</b> (once per rally).</p>
+    <p>Two faces, one webcam. Sit side by side —<br><b class="p1">left player</b> moves the left paddle, <b class="p2">right player</b> the right one.<br>Move your head up/down to move your paddle.<br>Open your mouth as the ball hits your paddle for a <b>power shot</b>!<br>Pucker your lips as it hits for a <b>curve shot</b> (once per rally).<br>
+      Solo? Fight through a <b>tournament of 5 computer bosses</b>, each with its own trick.</p>
     <div class="btns">
       <button id="btn-face2">2 Players — webcam (2 faces)</button>
-      <button id="btn-cpu" class="secondary">1 Player vs Computer — webcam</button>
+      <button id="btn-cpu" class="secondary">1 Player Tournament — webcam</button>
+      <button id="btn-cpu-keys" class="secondary">1 Player Tournament — keyboard</button>
       <button id="btn-keys" class="secondary">2 Players — keyboard</button>
     </div>
     <div id="status"></div>
@@ -50,10 +52,12 @@
         <input id="jaw" type="range" min="0.1" max="0.7" step="0.05" value="0.35"></label>
       <label>Pucker trigger level <span id="pucker-val">0.35</span>
         <input id="pucker" type="range" min="0.15" max="0.7" step="0.05" value="0.35"></label>
-      <label>Points to win <span id="win-val">7</span>
+      <label>Points to win (2 players) <span id="win-val">7</span>
         <input id="win" type="range" min="3" max="15" step="1" value="7"></label>
     </div>
     <div class="help">
+      Hit the ball through a glowing <b>power orb</b> to win it: <b style="color:#69db7c">⇕ big paddle</b> · <b style="color:#ffd43b">●● multi-ball</b> ·
+      <b style="color:#74c0fc">❄ freeze opponent</b> · <b style="color:#ff8787">▮ goal guard</b> (saves one goal).<br>
       Webcam: both players relax and hold still for a second to calibrate. Sit far enough back that both faces fit in the preview.<br>
       Keyboard: <span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> move, <kbd>D</kbd> power, <kbd>A</kbd> curve · <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> move, <kbd>←</kbd> power, <kbd>→</kbd> curve<br>
       Video stays on your computer; nothing is uploaded.
@@ -74,7 +78,7 @@
 </div>
 
 <script type="module">
-import { $, rand, clamp, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
+import { $, rand, clamp, dist2, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
 import { FaceTracker, Calibrator, bindCameraSelect, drawFaces, syncOverlay, puckerLevel } from "./js/face.js";
 import { Music, SONGS, bindMusicToggle, setMusicEnabled, musicPrefs } from "./js/music.js";
 
@@ -87,8 +91,26 @@ const CFG = {
   rangeY: 0.08, jawThreshold: 0.35, winScore: 7, lostGrace: 0.6,
   puckerThreshold: 0.35, // lip pucker above resting level that arms a curve shot
   curve: 1.8,            // sideways pull of a curve shot, in screen heights per second²
+  tourScore: 5,          // points per tournament match
+  maxBalls: 3,
 };
 const CURVE_COLOR = "#c58bff";
+// Tournament bosses, in order. maxV = paddle speed (screen heights/s), err = aiming error as a fraction of half a
+// paddle (above 1 it sometimes misses outright, so a good player can beat it).
+const OPPONENTS = [
+  { name: "Rookie Bot", maxV: 0.7, err: 1.7, speed: 0.95, color: "#ff5ea8", trick: "Just getting started." },
+  { name: "Twin Paddles", maxV: 0.85, err: 1.5, speed: 1.0, color: "#ff9f43", gimmick: "twin", trick: "Two paddles guard its goal." },
+  { name: "Wall Builder", maxV: 0.95, err: 1.45, speed: 1.05, color: "#a9e34b", gimmick: "walls", trick: "Drops walls in the middle of the court." },
+  { name: "Speed Demon", maxV: 1.35, err: 1.3, speed: 1.3, color: "#ffd43b", gimmick: "speed", trick: "Everything is faster." },
+  { name: "Omega", maxV: 1.15, err: 1.35, speed: 1.15, color: "#e64980", gimmick: "omega", trick: "A giant paddle that splits the ball — it shrinks as you score." },
+];
+const POWERS = {
+  big: { icon: "⇕", label: "Big paddle", color: "#69db7c", time: 10 },
+  multi: { icon: "●●", label: "Multi-ball", color: "#ffd43b" },
+  freeze: { icon: "❄", label: "Freeze", color: "#74c0fc", time: 1.6 },
+  guard: { icon: "▮", label: "Goal guard", color: "#ff8787" },
+};
+const POWER_NAMES = Object.keys(POWERS);
 let sensitivity = 1;
 $("sens").addEventListener("input", (e) => { sensitivity = +e.target.value; $("sens-val").textContent = sensitivity.toFixed(1) + "×"; });
 $("jaw").addEventListener("input", (e) => { CFG.jawThreshold = +e.target.value; $("jaw-val").textContent = CFG.jawThreshold.toFixed(2); });
@@ -102,7 +124,7 @@ const keys = trackKeys((code) => {
   if (code === "KeyM") audio.muted = !audio.muted;
   if (code === "KeyN") setMusicEnabled(!musicPrefs.enabled);
   if (code === "KeyQ" && S.running) showMenu();
-  if ((code === "Enter" || code === "NumpadEnter") && S.over) startGame(S.mode);
+  if ((code === "Enter" || code === "NumpadEnter") && S.over) $("btn-again").click();
 });
 
 // ---------- Face tracking ----------
@@ -112,6 +134,11 @@ const tracker = new FaceTracker(video, { numFaces: 2, cameraSelect: $("cam-selec
 const music = new Music(SONGS.pong);
 bindMusicToggle($("music-toggle"));
 bindCameraSelect($("cam-select")).catch(() => {});
+
+const usesCamera = () => S.mode === "face2" || S.mode === "cpu";
+const isTour = () => S.mode === "cpu" || S.mode === "cpuKeys";
+const opp = () => OPPONENTS[S.tourIdx];
+const gimmick = () => (isTour() ? opp().gimmick : undefined);
 
 // Splits detected faces between the players by which side of the (mirrored) picture they are on.
 // Raw video x is un-mirrored, so the person on the LEFT of the screen has the LARGER raw x.
@@ -163,75 +190,121 @@ function drawCamOverlay(assigned) {
 // ---------- Game state ----------
 const newPlayer = (usesFace, cpu = false) => ({
   y: 0, score: 0, usesFace, cpu, present: false, lostFor: 0, nose: { x: 0.5, y: 0.5 }, jaw: 0, pucker: 0,
-  calib: new Calibrator(15), flash: 0, curveUsed: false,
+  calib: new Calibrator(15), flash: 0, curveUsed: false, bigT: 0, frozen: 0, guard: false,
 });
 const S = {
   mode: null, running: false, paused: false, over: false, waiting: "",
   players: [newPlayer(false), newPlayer(false)],
-  ball: { x: 0, y: 0, vx: 0, vy: 0, r: 10, power: false, curve: 0, trail: [] },
-  speed: 0, serveTimer: 0, serveDir: 1, message: "", particles: [], cpuErr: 0,
+  balls: [], speed: 0, serveTimer: 0, serveDir: 1, message: "", particles: [], cpuErr: 0,
+  tourIdx: 0, orb: null, orbTimer: 6, walls: [], wallTimer: 4, texts: [],
 };
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
-window.facePong = { S, music, tracker, keys, assignFaces, step: (dt = 1 / 60) => update(dt) };
+window.facePong = {
+  S, music, tracker, keys, assignFaces, CFG, OPPONENTS, POWERS, paddlesOf: (i) => paddlesOf(i),
+  start: (mode, tourIdx = 0) => startGame(mode, tourIdx), give: (i, kind) => givePower(i, kind),
+  step: (dt = 1 / 60) => update(dt),
+};
 
 const paddle = () => ({ w: 14, h: clamp(view.H * 0.2, 70, 170), inset: Math.max(28, view.W * 0.04) });
-const baseSpeed = () => clamp(view.W * 0.45, 300, 700);
+const baseSpeed = () => clamp(view.W * 0.45, 300, 700) * (isTour() ? opp().speed : 1);
+const ballR = () => clamp(Math.min(view.W, view.H) * 0.018, 11, 16);
+const winTarget = () => (isTour() ? CFG.tourScore : CFG.winScore);
 
-function startGame(mode) {
+// The paddle(s) a player hits with: { y, h } centred boxes. Big paddle power, the twin and omega bosses change them.
+function paddlesOf(i) {
+  const p = S.players[i];
+  let h = paddle().h * (p.bigT > 0 ? 1.6 : 1);
+  if (p.cpu && gimmick() === "omega") h *= Math.max(0.9, 1.7 - 0.12 * S.players[0].score);
+  if (p.cpu && gimmick() === "twin") { const hh = h * 0.7, gap = view.H * 0.22; return [{ y: p.y - gap, h: hh }, { y: p.y + gap, h: hh }]; }
+  return [{ y: p.y, h }];
+}
+// How far the paddle set reaches above/below p.y (used to keep it on screen).
+const reachOf = (i) => Math.max(...paddlesOf(i).map((pd) => Math.abs(pd.y - S.players[i].y) + pd.h / 2));
+
+function startGame(mode, tourIdx = 0) {
   S.mode = mode;
-  S.players = [newPlayer(mode !== "keys"), newPlayer(mode === "face2", mode === "cpu")];
+  S.tourIdx = tourIdx;
+  S.players = [newPlayer(mode === "face2" || mode === "cpu"), newPlayer(mode === "face2", isTour())];
   S.players.forEach((p) => (p.y = view.H / 2));
-  Object.assign(S, { running: true, paused: false, over: false, particles: [], message: "" });
+  Object.assign(S, { running: true, paused: false, over: false, particles: [], texts: [], message: "", orb: null, orbTimer: 6, walls: [], wallTimer: 4 });
   serve(Math.random() < 0.5 ? -1 : 1);
+  if (isTour()) { S.message = `Match ${tourIdx + 1}/${OPPONENTS.length} — vs ${opp().name}: ${opp().trick}`; S.serveTimer = 3; }
   keys.clear();
   music.restart();
   unlockAudio();
   $("menu").classList.add("hidden");
   $("gameover").classList.add("hidden");
   $("hud").classList.remove("hidden");
-  $("cam-panel").classList.toggle("hidden", mode === "keys");
+  $("cam-panel").classList.toggle("hidden", !usesCamera());
+  const p1Keys = `<span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> · <kbd>D</kbd> power · <kbd>A</kbd> curve`;
+  const common = `<kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`;
   $("hud-help").innerHTML = mode === "keys"
-    ? `<span class="p1">P1</span> <kbd>W</kbd>/<kbd>S</kbd> · <kbd>D</kbd> power · <kbd>A</kbd> curve &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> · <kbd>←</kbd> power · <kbd>→</kbd> curve &nbsp;|&nbsp; <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`
-    : `Head up/down = paddle · at impact: mouth open = power, pucker = curve · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`;
+    ? `${p1Keys} &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>↑</kbd>/<kbd>↓</kbd> · <kbd>←</kbd> power · <kbd>→</kbd> curve &nbsp;|&nbsp; ${common}`
+    : mode === "cpuKeys" ? `${p1Keys} &nbsp;|&nbsp; ${common}`
+    : `Head up/down = paddle · at impact: mouth open = power, pucker = curve · <kbd>C</kbd> recalibrate · ${common}`;
 }
 
 function serve(dir) {
-  const b = S.ball;
-  b.x = view.W / 2; b.y = view.H / 2; b.vx = 0; b.vy = 0; b.power = false; b.curve = 0; b.trail = [];
+  const r = ballR();
+  S.balls = [{ x: view.W / 2, y: view.H / 2, vx: 0, vy: 0, r, power: false, curve: 0, trail: [], lastHit: -1 }];
   S.players.forEach((p) => (p.curveUsed = false)); // one curve shot per player per rally
   S.speed = baseSpeed();
   S.serveDir = dir;
   S.serveTimer = 1.2;
+  S.walls = [];
 }
 
 function launch() {
-  const a = rand(-0.5, 0.5);
-  S.ball.vx = Math.cos(a) * S.speed * S.serveDir;
-  S.ball.vy = Math.sin(a) * S.speed;
+  const a = rand(-0.5, 0.5), b = S.balls[0];
+  b.vx = Math.cos(a) * S.speed * S.serveDir;
+  b.vy = Math.sin(a) * S.speed;
 }
 
 function playerName(i) {
-  if (S.mode === "cpu") return i === 0 ? "You" : "Computer";
+  if (isTour()) return i === 0 ? "You" : opp().name;
   return `Player ${i + 1}`;
 }
 
-function pointTo(i) {
+function pointTo(i, ball) {
   const p = S.players[i];
   p.score++;
   sfx("score");
-  burst(S.ball.x, S.ball.y, COLORS[i], 30, 300);
-  if (p.score >= CFG.winScore) {
-    S.over = true;
-    sfx("win");
-    const won = playerName(i);
-    $("end-title").textContent = S.mode === "cpu" ? (i === 0 ? "You win! 🎉" : "Computer wins") : `${won} wins! 🎉`;
-    $("end-title").className = i === 0 ? "p1" : "p2";
-    $("end-text").innerHTML = `<span class="p1">${S.players[0].score}</span> : <span class="p2">${S.players[1].score}</span>`;
-    setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, 600);
-    return;
-  }
+  burst(ball.x, ball.y, COLORS[i], 30, 300);
+  if (p.score >= winTarget()) { matchWon(i); return; }
   S.message = `${playerName(i)} scores!`;
   serve(i === 0 ? 1 : -1); // serve toward the player who conceded
+}
+
+function matchWon(i) {
+  const [a, b] = S.players;
+  if (isTour() && i === 0 && S.tourIdx + 1 < OPPONENTS.length) {
+    // Beat this boss: on to the next one (scores reset, powers cleared)
+    const beaten = opp().name;
+    S.tourIdx++;
+    S.players.forEach((p) => Object.assign(p, { score: 0, bigT: 0, frozen: 0, guard: false, y: view.H / 2 }));
+    S.players[1].cpu = true;
+    S.orb = null; S.orbTimer = 6;
+    sfx("win");
+    serve(1);
+    S.message = `You beat ${beaten}! Next — ${opp().name}: ${opp().trick}`;
+    S.serveTimer = 3.2;
+    return;
+  }
+  S.over = true;
+  sfx("win");
+  if (isTour()) {
+    $("end-title").textContent = i === 0 ? "Tournament champion! 🏆" : `Knocked out by ${opp().name}`;
+    $("end-title").className = i === 0 ? "p1" : "p2";
+    $("end-text").innerHTML = i === 0 ? `You beat all ${OPPONENTS.length} bosses.`
+      : `Match ${S.tourIdx + 1}/${OPPONENTS.length} · <span class="p1">${a.score}</span> : <span class="p2">${b.score}</span><br>Rematch to retry this boss.`;
+    $("btn-again").textContent = i === 0 ? "Play again" : "Rematch";
+  } else {
+    $("end-title").textContent = `${playerName(i)} wins! 🎉`;
+    $("end-title").className = i === 0 ? "p1" : "p2";
+    $("end-text").innerHTML = `<span class="p1">${a.score}</span> : <span class="p2">${b.score}</span>`;
+    $("btn-again").textContent = "Rematch";
+  }
+  setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, 600);
 }
 
 function showMenu() {
@@ -251,10 +324,33 @@ function burst(x, y, color, n = 14, speed = 220) {
   }
 }
 
+function floatText(x, y, text, color) {
+  const stacked = S.texts.filter((t) => Math.abs(t.x - x) < 1 && t.life > 0.6).length; // don't overlap simultaneous popups
+  S.texts.push({ x, y: y + stacked * 26, text, color, life: 1.2 });
+}
+
+// ---------- Powers ----------
+function givePower(i, kind) {
+  const p = S.players[i], pw = POWERS[kind], other = S.players[1 - i];
+  if (kind === "big") p.bigT = pw.time;
+  else if (kind === "freeze") other.frozen = pw.time;
+  else if (kind === "guard") p.guard = true;
+  else if (kind === "multi") {
+    const b = S.balls[0];
+    for (const s of [-1, 1]) {
+      if (S.balls.length >= CFG.maxBalls || !b) break;
+      const a = Math.atan2(b.vy, b.vx) + s * 0.35, sp = Math.hypot(b.vx, b.vy) || S.speed;
+      S.balls.push({ ...b, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, trail: [], curve: 0 });
+    }
+  }
+  floatText(i === 0 ? view.W * 0.3 : view.W * 0.7, view.H * 0.3, `${pw.icon} ${pw.label}!`, pw.color);
+  sfx("shield");
+}
+
 // ---------- Update ----------
 function waitingReason() {
   if (S.paused) return "Paused — press P";
-  if (S.mode === "keys") return "";
+  if (!usesCamera()) return "";
   const faceP = S.players.map((p, i) => ({ p, i })).filter(({ p }) => p.usesFace);
   const lost = faceP.filter(({ p }) => p.lostFor > CFG.lostGrace);
   if (lost.length === faceP.length && tracker.dark) return tracker.lostMessage();
@@ -271,36 +367,42 @@ function waitingReason() {
 function update(dt) {
   for (const p of S.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt; }
   S.particles = S.particles.filter((p) => p.life > 0);
+  for (const t of S.texts) { t.y -= 30 * dt; t.life -= dt; }
+  S.texts = S.texts.filter((t) => t.life > 0);
 
   S.waiting = "";
   if (!S.running || S.over) return;
   S.waiting = waitingReason();
   if (S.waiting) return;
 
-  const { W, H } = view, pad = paddle(), b = S.ball;
-  const half = pad.h / 2, minY = half + 6, maxY = H - half - 6;
+  const { W, H } = view, pad = paddle();
 
   // Paddles
   S.players.forEach((p, i) => {
     p.flash = Math.max(0, p.flash - dt);
+    p.bigT = Math.max(0, p.bigT - dt);
+    if (p.frozen > 0) { p.frozen = Math.max(0, p.frozen - dt); return; }
+    const reach = reachOf(i);
     if (p.usesFace) {
       const c = p.calib.value;
       const ay = clamp(((p.nose.y - c.y) / CFG.rangeY) * sensitivity, -1, 1);
-      const target = H / 2 + ay * (H / 2 - half - 6);
+      const target = H / 2 + ay * (H / 2 - reach - 6);
       p.y += (target - p.y) * (1 - Math.exp(-dt * 14));
     } else if (p.cpu) {
-      // Follows the ball when it is coming, with a small aiming error; drifts to the middle otherwise.
-      const coming = b.vx > 0;
-      if (coming && Math.random() < dt * 2) S.cpuErr = rand(-half * 0.8, half * 0.8);
-      const target = coming ? b.y + S.cpuErr : H / 2;
-      const maxV = H * 0.95;
+      // Follows the nearest incoming ball with an aiming error; drifts to the middle otherwise.
+      const incoming = S.balls.filter((b) => b.vx > 0).sort((a, b) => (W - a.x) / a.vx - (W - b.x) / b.vx)[0];
+      const half = paddlesOf(i)[0].h / 2, o = isTour() ? opp() : { maxV: 0.95, err: 0.8 };
+      if (incoming && Math.random() < dt * 2) S.cpuErr = rand(-half * o.err, half * o.err);
+      let target = incoming ? incoming.y + S.cpuErr : H / 2;
+      if (gimmick() === "twin" && incoming) target += incoming.y < p.y ? H * 0.22 : -H * 0.22; // line up the nearer paddle
+      const maxV = H * o.maxV;
       p.y += clamp(target - p.y, -maxV * dt, maxV * dt);
     } else {
       const up = i === 0 ? keys.has("KeyW") : keys.has("ArrowUp");
       const down = i === 0 ? keys.has("KeyS") : keys.has("ArrowDown");
       p.y += (down - up) * H * 1.1 * dt;
     }
-    p.y = clamp(p.y, minY, maxY);
+    p.y = clamp(p.y, reach + 6, H - reach - 6);
   });
 
   // Serve countdown
@@ -310,52 +412,103 @@ function update(dt) {
     return;
   }
 
-  // Ball
-  const prevX = b.x;
-  if (b.curve) b.vy = clamp(b.vy + b.curve * dt, -S.speed * 1.2, S.speed * 1.2); // curve shot bends the path
-  b.x += b.vx * dt; b.y += b.vy * dt;
-  b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 12) b.trail.shift();
-  if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy); sfx("wall"); }
-  if (b.y > H - b.r) { b.y = H - b.r; b.vy = -Math.abs(b.vy); sfx("wall"); }
+  // Power orb: appears mid-court; a ball passing through gives it to whoever hit that ball last
+  if (!S.orb && (S.orbTimer -= dt) <= 0) S.orb = { x: W * rand(0.35, 0.65), y: H * rand(0.2, 0.8), kind: POWER_NAMES[Math.floor(Math.random() * POWER_NAMES.length)], t: 0, r: 26 };
+  if (S.orb) S.orb.t += dt;
+  // Wall Builder drops temporary walls in the middle of the court
+  if (gimmick() === "walls" && (S.wallTimer -= dt) <= 0) {
+    S.wallTimer = 4.5;
+    S.walls.push({ x: W * rand(0.42, 0.58) - 9, y: H * rand(0.15, 0.65), w: 18, h: H * 0.2, life: 5.5 });
+  }
+  for (const wl of S.walls) wl.life -= dt;
+  S.walls = S.walls.filter((wl) => wl.life > 0);
 
-  // Paddle hits (checks the crossing so a fast ball can't tunnel through)
+  // Balls
   const faces = [pad.inset + pad.w / 2, W - pad.inset - pad.w / 2]; // inner face x of each paddle
-  for (const i of [0, 1]) {
-    const dir = i === 0 ? -1 : 1; // ball direction that approaches this paddle
-    if (Math.sign(b.vx) !== dir) continue;
-    const edge = faces[i];
-    const crossed = i === 0 ? prevX - b.r >= edge && b.x - b.r <= edge : prevX + b.r <= edge && b.x + b.r >= edge;
-    const p = S.players[i];
-    if (crossed && Math.abs(b.y - p.y) <= half + b.r) {
-      const rel = clamp((b.y - p.y) / half, -1, 1);
-      const angle = rel * (Math.PI / 3);
-      S.speed = Math.min(S.speed * 1.06, W * 1.3);
-      const power = isPowering(i);
-      const sp = S.speed * (power ? 1.45 : 1);
-      b.vx = -dir * Math.cos(angle) * sp;
-      b.vy = Math.sin(angle) * sp;
-      b.x = edge - dir * b.r;
-      b.power = power;
-      // Curve shot: pull against the ball's vertical direction so it bends back mid-flight
-      const curve = isCurving(i);
-      if (curve) p.curveUsed = true;
-      b.curve = curve ? -(Math.sign(b.vy) || (Math.random() < 0.5 ? -1 : 1)) * CFG.curve * H : 0;
-      p.flash = 0.25;
-      burst(b.x, b.y, power ? "#ffd25e" : curve ? CURVE_COLOR : COLORS[i], power || curve ? 26 : 10, power ? 320 : 180);
-      sfx(power ? "power" : "paddle");
-      if (curve) sfx("curve");
+  for (const b of S.balls) {
+    const prevX = b.x;
+    if (b.curve) b.vy = clamp(b.vy + b.curve * dt, -S.speed * 1.2, S.speed * 1.2); // curve shot bends the path
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 12) b.trail.shift();
+    if (b.y < b.r) { b.y = b.r; b.vy = Math.abs(b.vy); sfx("wall"); }
+    if (b.y > H - b.r) { b.y = H - b.r; b.vy = -Math.abs(b.vy); sfx("wall"); }
+    for (const wl of S.walls) bounceOffWall(b, wl);
+
+    // Paddle hits (checks the crossing so a fast ball can't tunnel through)
+    for (const i of [0, 1]) {
+      const dir = i === 0 ? -1 : 1; // ball direction that approaches this paddle
+      if (Math.sign(b.vx) !== dir) continue;
+      const edge = faces[i];
+      const crossed = i === 0 ? prevX - b.r >= edge && b.x - b.r <= edge : prevX + b.r <= edge && b.x + b.r >= edge;
+      if (!crossed) continue;
+      const pd = paddlesOf(i).find((q) => Math.abs(b.y - q.y) <= q.h / 2 + b.r);
+      if (pd) hitBall(b, i, pd, edge, dir);
+    }
+
+    if (S.orb && dist2(b.x, b.y, S.orb.x, S.orb.y) < (S.orb.r + b.r) ** 2 && b.lastHit >= 0) {
+      burst(S.orb.x, S.orb.y, POWERS[S.orb.kind].color, 24, 260);
+      givePower(b.lastHit, S.orb.kind);
+      S.orb = null; S.orbTimer = rand(7, 11);
+    }
+
+    // Goals (a goal guard bounces the ball back once)
+    for (const i of [0, 1]) {
+      const out = i === 0 ? b.x < -b.r : b.x > W + b.r;
+      if (!out) continue;
+      const p = S.players[i];
+      if (p.guard) {
+        p.guard = false;
+        b.x = i === 0 ? b.r : W - b.r; b.vx = -b.vx;
+        burst(b.x, b.y, POWERS.guard.color, 24, 240); sfx("bounce");
+        continue;
+      }
+      pointTo(1 - i, b);
+      return; // serve() replaced the balls
     }
   }
+}
 
-  // Points
-  if (b.x < -b.r * 2) pointTo(1);
-  else if (b.x > W + b.r * 2) pointTo(0);
+function hitBall(b, i, pd, edge, dir) {
+  const { W, H } = view, half = pd.h / 2, p = S.players[i];
+  const rel = clamp((b.y - pd.y) / half, -1, 1);
+  const angle = rel * (Math.PI / 3);
+  S.speed = Math.min(S.speed * (gimmick() === "speed" ? 1.08 : 1.06), W * 1.3);
+  const power = isPowering(i);
+  const sp = S.speed * (power ? 1.45 : 1);
+  b.vx = -dir * Math.cos(angle) * sp;
+  b.vy = Math.sin(angle) * sp;
+  b.x = edge - dir * b.r;
+  b.power = power;
+  b.lastHit = i;
+  // Curve shot: pull against the ball's vertical direction so it bends back mid-flight
+  const curve = isCurving(i);
+  if (curve) p.curveUsed = true;
+  b.curve = curve ? -(Math.sign(b.vy) || (Math.random() < 0.5 ? -1 : 1)) * CFG.curve * H : 0;
+  p.flash = 0.25;
+  burst(b.x, b.y, power ? "#ffd25e" : curve ? CURVE_COLOR : COLORS[i], power || curve ? 26 : 10, power ? 320 : 180);
+  sfx(power ? "power" : "paddle");
+  if (curve) sfx("curve");
+  // Omega splits the ball now and then
+  if (p.cpu && gimmick() === "omega" && S.balls.length < CFG.maxBalls && Math.random() < 0.3) {
+    S.balls.push({ ...b, vy: -b.vy || S.speed * 0.3, trail: [], curve: 0 });
+    floatText(W * 0.7, H * 0.2, "Ball split!", opp().color);
+  }
+}
+
+// Bounces a ball off a rectangular wall along whichever axis it overlaps least.
+function bounceOffWall(b, wl) {
+  const cx = clamp(b.x, wl.x, wl.x + wl.w), cy = clamp(b.y, wl.y, wl.y + wl.h);
+  if (dist2(b.x, b.y, cx, cy) > b.r * b.r) return;
+  const ox = Math.min(b.x + b.r - wl.x, wl.x + wl.w - (b.x - b.r)), oy = Math.min(b.y + b.r - wl.y, wl.y + wl.h - (b.y - b.r));
+  if (ox < oy) { b.vx = b.x < wl.x + wl.w / 2 ? -Math.abs(b.vx) : Math.abs(b.vx); b.x += b.vx > 0 ? ox : -ox; }
+  else { b.vy = b.y < wl.y + wl.h / 2 ? -Math.abs(b.vy) : Math.abs(b.vy); b.y += b.vy > 0 ? oy : -oy; }
+  sfx("wall");
 }
 
 function isPowering(i) {
   const p = S.players[i];
   if (p.usesFace) return p.jaw > CFG.jawThreshold;
-  if (p.cpu) return Math.random() < 0.15;
+  if (p.cpu) return Math.random() < (gimmick() === "speed" ? 0.25 : 0.15);
   return i === 0 ? keys.has("KeyD") : keys.has("ArrowLeft");
 }
 
@@ -379,48 +532,71 @@ function render() {
   ctx.beginPath(); ctx.arc(W / 2, H / 2, Math.min(W, H) * 0.12, 0, Math.PI * 2); ctx.stroke();
 
   if (!S.running) return;
-  const pad = paddle(), b = S.ball;
+  const pad = paddle();
+  const p2Color = isTour() ? opp().color : COLORS[1];
 
   // scores
-  ctx.font = `700 ${Math.round(Math.min(W, H) * 0.12)}px system-ui, sans-serif`;
+  const scoreSize = Math.round(Math.min(W, H) * 0.12);
+  ctx.font = `700 ${scoreSize}px system-ui, sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   ctx.fillStyle = "rgba(94,224,255,0.35)"; ctx.fillText(S.players[0].score, W * 0.3, H * 0.06);
   ctx.fillStyle = "rgba(255,94,168,0.35)"; ctx.fillText(S.players[1].score, W * 0.7, H * 0.06);
   ctx.font = `600 13px system-ui, sans-serif`;
   ctx.fillStyle = "rgba(255,255,255,0.45)";
   ctx.fillText(playerName(0), W * 0.3, H * 0.06 - 18);
-  ctx.fillText(playerName(1), W * 0.7, H * 0.06 - 18);
-  // curve shot availability for this rally
-  const scoreSize = Math.round(Math.min(W, H) * 0.12);
+  ctx.fillStyle = isTour() ? p2Color : "rgba(255,255,255,0.45)";
+  ctx.fillText(isTour() ? `Boss ${S.tourIdx + 1}/${OPPONENTS.length}: ${playerName(1)}` : playerName(1), W * 0.7, H * 0.06 - 18);
+  // curve shot availability + active powers
   S.players.forEach((p, i) => {
+    const x = W * (i === 0 ? 0.3 : 0.7);
     ctx.fillStyle = p.curveUsed ? "rgba(255,255,255,0.2)" : "rgba(197,139,255,0.8)";
-    ctx.fillText(p.curveUsed ? "curve used" : "curve ready", W * (i === 0 ? 0.3 : 0.7), H * 0.06 + scoreSize + 6);
+    ctx.fillText(p.curveUsed ? "curve used" : "curve ready", x, H * 0.06 + scoreSize + 6);
+    const tags = [p.bigT > 0 && `⇕ ${Math.ceil(p.bigT)}s`, p.frozen > 0 && "❄ frozen", p.guard && "▮ guard"].filter(Boolean).join("  ");
+    if (tags) { ctx.fillStyle = "#ffd43b"; ctx.fillText(tags, x, H * 0.06 + scoreSize + 24); }
   });
 
-  // paddles: gold = power armed (mouth open), purple = curve armed (pucker)
+  // walls + power orb
+  for (const wl of S.walls) {
+    ctx.fillStyle = `rgba(169,227,75,${clamp(wl.life, 0, 1) * 0.85})`; ctx.shadowColor = "#a9e34b"; ctx.shadowBlur = 14;
+    roundRect(wl.x, wl.y, wl.w, wl.h, 5);
+  }
+  ctx.shadowBlur = 0;
+  if (S.orb) drawOrb(S.orb);
+
+  // goal guards
   S.players.forEach((p, i) => {
-    const x = i === 0 ? pad.inset - pad.w / 2 : W - pad.inset - pad.w / 2;
-    const armed = isArmedVisual(i);
-    const col = armed === "power" ? "#ffd25e" : armed === "curve" ? CURVE_COLOR : COLORS[i];
-    ctx.shadowColor = col;
-    ctx.shadowBlur = armed ? 28 : 12 + p.flash * 60;
-    ctx.fillStyle = col;
-    roundRect(x, p.y - pad.h / 2, pad.w, pad.h, 7);
+    if (!p.guard) return;
+    ctx.fillStyle = POWERS.guard.color; ctx.shadowColor = POWERS.guard.color; ctx.shadowBlur = 16;
+    ctx.fillRect(i === 0 ? 0 : W - 5, 0, 5, H);
     ctx.shadowBlur = 0;
   });
 
-  // ball + trail (gold = power shot, purple = curve shot)
-  const ballCol = b.power ? "#ffd25e" : b.curve ? CURVE_COLOR : "#ffffff";
-  b.trail.forEach((t, k) => {
-    ctx.globalAlpha = (k / b.trail.length) * 0.35;
-    ctx.fillStyle = b.power ? "#ffb35e" : ballCol;
-    ctx.beginPath(); ctx.arc(t.x, t.y, b.r * (0.5 + k / b.trail.length / 2), 0, Math.PI * 2); ctx.fill();
+  // paddles: gold = power armed (mouth open), purple = curve armed (pucker), grey = frozen
+  S.players.forEach((p, i) => {
+    const x = i === 0 ? pad.inset - pad.w / 2 : W - pad.inset - pad.w / 2;
+    const armed = isArmedVisual(i);
+    const col = p.frozen > 0 ? "#adb5bd" : armed === "power" ? "#ffd25e" : armed === "curve" ? CURVE_COLOR : i === 1 ? p2Color : COLORS[i];
+    ctx.shadowColor = col;
+    ctx.shadowBlur = armed ? 28 : 12 + p.flash * 60;
+    ctx.fillStyle = col;
+    for (const pd of paddlesOf(i)) roundRect(x, pd.y - pd.h / 2, pad.w, pd.h, 7);
+    ctx.shadowBlur = 0;
   });
-  ctx.globalAlpha = 1;
-  ctx.shadowColor = b.power ? "#ffb35e" : ballCol; ctx.shadowBlur = b.power || b.curve ? 30 : 12;
-  ctx.fillStyle = ballCol;
-  ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
-  ctx.shadowBlur = 0;
+
+  // balls + trails (gold = power shot, purple = curve shot)
+  for (const b of S.balls) {
+    const ballCol = b.power ? "#ffd25e" : b.curve ? CURVE_COLOR : "#ffffff";
+    b.trail.forEach((t, k) => {
+      ctx.globalAlpha = (k / b.trail.length) * 0.35;
+      ctx.fillStyle = b.power ? "#ffb35e" : ballCol;
+      ctx.beginPath(); ctx.arc(t.x, t.y, b.r * (0.5 + k / b.trail.length / 2), 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+    ctx.shadowColor = b.power ? "#ffb35e" : ballCol; ctx.shadowBlur = b.power || b.curve ? 30 : 12;
+    ctx.fillStyle = ballCol;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
 
   for (const p of S.particles) {
     ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
@@ -428,9 +604,27 @@ function render() {
     ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
   }
   ctx.globalAlpha = 1;
+  ctx.font = "700 20px system-ui, sans-serif"; ctx.textBaseline = "middle";
+  for (const t of S.texts) { ctx.globalAlpha = clamp(t.life, 0, 1); ctx.fillStyle = t.color; ctx.fillText(t.text, t.x, t.y); }
+  ctx.globalAlpha = 1;
 
   if (S.waiting) drawBanner(ctx, W, H, S.waiting);
   else if (S.serveTimer > 0) drawBanner(ctx, W, H, S.message || `Get ready… ${Math.ceil(S.serveTimer)}`, "#ffffff");
+}
+
+function drawOrb(o) {
+  const pw = POWERS[o.kind], pulse = 0.5 + 0.5 * Math.sin(o.t * 6);
+  ctx.save();
+  ctx.translate(o.x, o.y);
+  ctx.shadowColor = pw.color; ctx.shadowBlur = 20 + pulse * 20;
+  ctx.fillStyle = "rgba(10,14,32,0.8)";
+  ctx.beginPath(); ctx.arc(0, 0, o.r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = pw.color; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.rotate(o.t);
+  ctx.beginPath(); ctx.arc(0, 0, o.r, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  ctx.rotate(-o.t); ctx.shadowBlur = 0;
+  ctx.fillStyle = pw.color; ctx.font = `800 ${o.r}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(pw.icon, 0, 1);
+  ctx.restore();
 }
 
 // Which shot a player currently has armed: "power" (mouth open), "curve" (pucker) or "".
@@ -455,7 +649,7 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.05);
   if (dt <= 0) { requestAnimationFrame(frame); return; }
   last = now;
-  if (S.running && S.mode !== "keys") updateFaces(now, dt);
+  if (S.running && usesCamera()) updateFaces(now, dt);
   music.setPlaying(S.running && !S.over && !S.paused);
   update(dt);
   render();
@@ -470,13 +664,13 @@ function setStatus(msg, isError = false) {
   el.classList.toggle("error", isError);
 }
 
-const menuBtns = [$("btn-face2"), $("btn-cpu"), $("btn-keys")];
-async function startWithCamera(mode) {
+const menuBtns = [$("btn-face2"), $("btn-cpu"), $("btn-cpu-keys"), $("btn-keys")];
+async function startWithCamera(mode, tourIdx = 0) {
   menuBtns.forEach((b) => (b.disabled = true));
   unlockAudio();
   try {
     await tracker.start();
-    startGame(mode);
+    startGame(mode, tourIdx);
   } catch (err) {
     console.error(err);
     setStatus(cameraErrorMessage(err), true);
@@ -486,8 +680,13 @@ async function startWithCamera(mode) {
 }
 $("btn-face2").addEventListener("click", () => startWithCamera("face2"));
 $("btn-cpu").addEventListener("click", () => startWithCamera("cpu"));
+$("btn-cpu-keys").addEventListener("click", () => { tracker.stop(); startGame("cpuKeys"); });
 $("btn-keys").addEventListener("click", () => { tracker.stop(); startGame("keys"); });
-$("btn-again").addEventListener("click", () => startGame(S.mode));
+// Rematch: a lost tournament match retries the same boss; otherwise start over
+$("btn-again").addEventListener("click", () => {
+  const champion = isTour() && S.players[0].score >= winTarget();
+  startGame(S.mode, isTour() && !champion ? S.tourIdx : 0);
+});
 $("btn-menu").addEventListener("click", showMenu);
 </script>
 </body>
