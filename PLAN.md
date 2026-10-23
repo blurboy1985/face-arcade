@@ -153,3 +153,6 @@ boss HP/defeat bonus/escape, every power, multi-fruit swipe, streak reset on mis
   King Melon down in 8 hits (+57 incl. time bonus), unbeaten boss escapes at 30 s → next stage; ≤5 boss hits/s;
   Coconut shield blocks then un-blocks; Durian throws bombs; Dragonfruit teleports; mouse run from stage 4 beats
   both bosses; no console errors.
+- [x] PR https://github.com/blurboy1985/face-arcade/pull/2 merged; deployed (wrangler version ff7089bc) —
+  live /ninja runs to the stage-5 boss with no console errors.
+- [ ] Real webcam play — needs the user.
