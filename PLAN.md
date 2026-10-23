@@ -81,3 +81,42 @@ Webcam face-controlled browser games. A launcher lets the player choose 1 of 3 g
 ## Previous work (Face Pilot)
 - Done and verified; camera fix: Chrome lists LSVCam / AMD Privacy View / OBS Virtual (virtual) + UGREEN Camera 4K (real).
   Auto mode ranks real cams first and skips black feeds. User's UGREEN image was black (shutter likely closed).
+
+## Two 2-player HAND games (2026-10-24)
+Request: 2 more games, 2 players, controlled by hand movement; one is a Fruit Ninja-style game.
+Ship it: branch `hand-games` → PR → self-review → merge → Cloudflare deploy (user pre-authorized, no check-ins).
+
+| Page | Game | Players | Hand controls | Fallback |
+|---|---|---|---|---|
+| `ninja.html` | **Hand Ninja** — fruit slicing duel | 2 (or 1) | index fingertip = blade; swipe fast to slice | mouse / touch |
+| `hockey.html` | **Hand Hockey** — air hockey | 2 (or vs CPU) | palm moves your mallet in your half | P1 WASD · P2 arrows |
+
+Design
+- `js/hands.js`: `HandTracker` (MediaPipe HandLandmarker, up to 4 hands), reuses `openCamera` from `face.js`
+  (exported, behaviour unchanged). Hands split between players by side of the mirrored picture, like Pong faces.
+- Ninja 2P: screen split into two lanes; both lanes get the **same seeded fruit waves** (fair duel). 60 s round,
+  fruit +1, combo (3+ in one swipe) bonus, gold fruit +5, bomb −10 and blade stunned 1 s. Highest score wins.
+- Hockey: puck/mallet circle physics in sub-steps, mallet velocity transfers to puck, goals left/right, first to 7.
+- Two new original chiptunes in `music.js`; new SFX in `util.js`.
+- Launcher cards, README, `.assetsignore` updated.
+
+Verify
+- Both pages load with no console errors; launcher shows 5 cards.
+- Injected fake hand data via `window.handNinja` / `window.handHockey` debug hooks: hand→player assignment,
+  swipe slices fruit (slow move doesn't), bomb penalty, combos, round end + winner; mallet hits puck, goals,
+  win screen, CPU plays, keyboard mode.
+- Live site serves ninja.html / hockey.html after deploy.
+
+Status (2026-10-24)
+- [x] Built `js/hands.js`, `ninja.html`, `hockey.html`, 2 songs, SFX, launcher cards, README, `.assetsignore`.
+- [x] Verified in the browser pane with injected hands (`window.handNinja` / `window.handHockey`):
+  - Ninja: waiting messages per player; both lanes get identical fruit; slow sweep (240 px/s) doesn't slice,
+    fast swipe does; bomb −10 + 1 s jam; 3-fruit swipe → +3 combo; round end → winner screen; mouse mode slices.
+  - Hockey: waiting messages; hands → correct half; swing shot (1650 px/s); goal + serve to conceder; 7-goal win
+    screen; keyboard mallets move; 3-minute CPU soak per skill — puck never stalls, Easy 8–10 / Normal 13–7 /
+    Hard 21–3 vs a scripted player.
+  - All 5 pages load with no errors; all 5 songs 128 steps; real HandLandmarker model loads from the CDN.
+- Fixes found while testing: first swipe after holding still was measured over the whole pause (never sliced);
+  blade-continuity limit too tight for fast swipes; CPU only nudged the puck (stalled kick-off) and could push a
+  puck behind it into its own goal.
+- [ ] Real webcam play with two people — needs the user (no camera in the test browser).

@@ -2,7 +2,7 @@
 // Uses MediaPipe Tasks Vision FaceLandmarker; everything runs locally in the browser.
 import { loadStr, saveStr } from "./util.js";
 
-const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+export const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 const CAM_KEY = "faceArcadeCam";
 
@@ -26,7 +26,7 @@ async function loadLandmarker(numFaces) {
 }
 
 // Resolves to the promise's value, or rejects if it takes longer than `ms`.
-function withTimeout(promise, ms, message) {
+export function withTimeout(promise, ms, message) {
   let timer;
   return Promise.race([
     promise,
@@ -87,7 +87,7 @@ async function isBlankStream(stream, timeoutMs = 1500) {
 // Opens the chosen camera, or in "auto" mode the best working one: real cameras before virtual
 // ones, skipping any that fail to start or only send black frames. Some webcams (notably 4K USB
 // ones) also reject certain resolutions, so each device is tried at a few sizes.
-async function openCamera(choice, onStatus) {
+export async function openCamera(choice, onStatus) {
   let lastErr = null;
   const tryOpen = async (video) => {
     try { return await navigator.mediaDevices.getUserMedia({ video, audio: false }); }

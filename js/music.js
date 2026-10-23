@@ -17,7 +17,7 @@ const hz = (midi) => 440 * 2 ** ((midi - 69) / 12);
 
 const CHORDS = {
   C: ["C", "E", "G"], Am: ["A", "C", "E"], F: ["F", "A", "C"], G: ["G", "B", "D"],
-  Em: ["E", "G", "B"], D: ["D", "F#", "A"],
+  Em: ["E", "G", "B"], D: ["D", "F#", "A"], Dm: ["D", "F", "A"], Bb: ["A#", "D", "F"], A: ["A", "C#", "E"],
 };
 // Chord tones stacked upward from the root in the given octave, plus the octave on top.
 function chordTones(name, oct) {
@@ -152,6 +152,46 @@ export const SONGS = {
     bass: "drive",
     beat: "k . h k s . h . k . h k s . h h",
     voices: { lead: ["square", 0.28, 3000], arp: ["triangle", 0.2], bass: ["sawtooth", 0.4, 700] },
+  }),
+
+  // Hand Ninja — "Blade Dance": swift D-minor track with a harmonic-minor turn.
+  ninja: song({
+    bpm: 128,
+    chords: ["Dm", "Bb", "C", "A", "Dm", "Bb", "C", "A"],
+    lead: [
+      "D5 - - A4 - - D5 - F5 - E5 - D5 - C5 -",
+      "D5 - - - A#4 - - - F4 - - - A#4 - D5 -",
+      "E5 - - C5 - - E5 - G5 - F5 - E5 - D5 -",
+      "C#5 - - - E5 - - - A5 - - - . . . .",
+      "A5 - A5 - F5 - D5 - A5 - - - G5 - F5 -",
+      "F5 - F5 - D5 - A#4 - D5 - - - F5 - - -",
+      "G5 - E5 - C5 - E5 - G5 - A5 - G5 - E5 -",
+      "E5 - - - C#5 - - - A4 - - - E5 - C#5 -",
+    ],
+    arp: { oct: 4, order: [0, 1, 2, 1] },
+    bass: "drive",
+    beat: "k . h . s . h k k . h . s . h .",
+    voices: { lead: ["square", 0.28, 2800], arp: ["sawtooth", 0.12, 1600], bass: ["triangle", 0.8] },
+  }),
+
+  // Hand Hockey — "Ice Breaker": bright G-major rink tune.
+  hockey: song({
+    bpm: 136,
+    chords: ["G", "D", "Em", "C", "G", "D", "Em", "C"],
+    lead: [
+      "G4 - B4 - D5 - G5 - - - D5 - B4 - D5 -",
+      "A4 - - - F#4 - A4 - D5 - - - C5 - B4 -",
+      "B4 - E5 - G5 - - - F#5 - E5 - D5 - B4 -",
+      "C5 - - - E5 - - - G4 - - - . . . .",
+      "D5 . D5 . G5 - B5 - A5 - G5 - D5 - - -",
+      "F#5 - A5 - F#5 - D5 - A4 - - - D5 - - -",
+      "E5 - G5 - B5 - G5 - E5 - F#5 - G5 - A5 -",
+      "G5 - - - E5 - - - C5 - - - D5 - - -",
+    ],
+    arp: { oct: 4, order: [0, 1, 2, 3] },
+    bass: "oompah",
+    beat: "k . h . s . h . k k h . s . h .",
+    voices: { lead: ["square", 0.3, 3000], arp: ["triangle", 0.18], bass: ["triangle", 0.8] },
   }),
 };
 

@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hand Hockey</title>
+<link rel="stylesheet" href="css/common.css">
+<style>
+  #hud { justify-content: center; }
+  #hud .small { text-align: center; }
+  #cam-panel { left: 50%; right: auto; transform: translateX(-50%); width: 200px; opacity: 0.9; }
+  .card h1 { background: linear-gradient(90deg, #5ee0ff, #b8f2ff, #ff5ea8); -webkit-background-clip: text; background-clip: text; }
+  .p1 { color: #5ee0ff; } .p2 { color: #ff5ea8; }
+  @media (max-width: 600px) { #cam-panel { width: 130px; } }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="small" id="hud-help"></div>
+</div>
+
+<div id="cam-panel" class="hidden">
+  <div id="cam-wrap">
+    <video id="cam" playsinline muted></video>
+    <canvas id="cam-overlay"></canvas>
+  </div>
+  <div class="cam-label"><span id="cam-name"></span></div>
+</div>
+
+<div id="menu" class="screen">
+  <div class="card">
+    <h1>Hand Hockey</h1>
+    <p>Air hockey with your <b>hand as the mallet</b>. Sit side by side —<br>
+      <b class="p1">left player</b> defends the left goal, <b class="p2">right player</b> the right one.<br>
+      Move your open hand around in front of the camera to move your mallet. Swing into the puck to shoot hard!</p>
+    <div class="btns">
+      <button id="btn-hands2">2 Players — webcam (hands)</button>
+      <button id="btn-cpu" class="secondary">1 Player vs Computer — webcam</button>
+      <button id="btn-keys" class="secondary">2 Players — keyboard</button>
+    </div>
+    <div id="status"></div>
+    <div class="settings">
+      <label>Music <kbd>N</kbd>
+        <input id="music-toggle" type="checkbox" checked></label>
+      <label>Camera
+        <select id="cam-select"><option value="auto">Auto (skip virtual cameras)</option></select></label>
+      <label>Goals to win <span id="win-val">7</span>
+        <input id="win" type="range" min="3" max="15" step="1" value="7"></label>
+      <label>Computer skill <span id="cpu-val">Normal</span>
+        <input id="cpu" type="range" min="0" max="2" step="1" value="1"></label>
+    </div>
+    <div class="help">
+      Webcam: hold one hand up, palm toward the camera. Sit far enough back that both players fit in the preview.<br>
+      Keyboard: <span class="p1">P1</span> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> · <span class="p2">P2</span> <kbd>←↑↓→</kbd><br>
+      Video stays on your computer; nothing is uploaded.
+    </div>
+    <a class="back" href="index.html">← All games</a>
+  </div>
+</div>
+
+<div id="gameover" class="screen hidden">
+  <div class="card">
+    <h2 id="end-title">Player 1 wins!</h2>
+    <p id="end-text"></p>
+    <div class="btns">
+      <button id="btn-again">Rematch</button>
+      <button id="btn-menu" class="secondary">Menu</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { $, clamp, dist2, fitCanvas, drawBanner, audio, sfx, unlockAudio, trackKeys, cameraErrorMessage } from "./js/util.js";
+import { bindCameraSelect, syncOverlay } from "./js/face.js";
+import { HandTracker, makeHand, splitBySide, mapToRect, drawHands } from "./js/hands.js";
+import { Music, SONGS, bindMusicToggle, setMusicEnabled, musicPrefs } from "./js/music.js";
+
+const view = fitCanvas($("game"));
+const ctx = view.ctx;
+const COLORS = ["#5ee0ff", "#ff5ea8"];
+
+// ---------- Settings ----------
+const CFG = {
+  winScore: 7, lostGrace: 0.6,
+  restitution: 0.92, // bounciness of mallet hits
+  friction: 0.35,    // puck slow-down per second (exponential)
+  cpuSkill: 1,       // 0 easy, 1 normal, 2 hard
+};
+const CPU_NAMES = ["Easy", "Normal", "Hard"];
+$("win").addEventListener("input", (e) => { CFG.winScore = +e.target.value; $("win-val").textContent = CFG.winScore; });
+$("cpu").addEventListener("input", (e) => { CFG.cpuSkill = +e.target.value; $("cpu-val").textContent = CPU_NAMES[CFG.cpuSkill]; });
+
+// ---------- Input ----------
+const keys = trackKeys((code) => {
+  if (code === "KeyP" || code === "Escape") { if (S.running && !S.over) S.paused = !S.paused; }
+  if (code === "KeyM") audio.muted = !audio.muted;
+  if (code === "KeyN") setMusicEnabled(!musicPrefs.enabled);
+  if (code === "KeyQ" && S.running) showMenu();
+  if ((code === "Enter" || code === "NumpadEnter") && S.over) startGame(S.mode);
+});
+
+// ---------- Hand tracking ----------
+const video = $("cam");
+const camCtx = $("cam-overlay").getContext("2d");
+const tracker = new HandTracker(video, { numHands: 4, cameraSelect: $("cam-select"), onStatus: setStatus });
+const music = new Music(SONGS.hockey);
+bindMusicToggle($("music-toggle"));
+bindCameraSelect($("cam-select")).catch(() => {});
+let injectedHands = null; // debug hook: fake hands instead of the camera
+
+// Each hand-controlled player follows one hand: on their side of the picture, the one nearest
+// the hand they used last frame (so raising a second hand doesn't make the mallet jump).
+function updateHands(now, dt) {
+  const hands = injectedHands ?? tracker.update(now, dt);
+  const perPlayer = S.mode === "hands2" ? splitBySide(hands) : [hands, []];
+  const used = [[], []];
+  S.players.forEach((p, i) => {
+    if (!p.usesHand) return;
+    const list = perPlayer[i];
+    if (!list.length) { p.lostFor += dt; return; }
+    const pick = p.lastPalm ? list.reduce((a, b) => (dist2(b.palm.x, b.palm.y, p.lastPalm.x, p.lastPalm.y) < dist2(a.palm.x, a.palm.y, p.lastPalm.x, p.lastPalm.y) ? b : a)) : list[0];
+    p.lastPalm = pick.palm; p.lostFor = 0; used[i] = [pick];
+    const r = halfRect(i);
+    const cam = S.mode === "hands2" ? (i === 0 ? { x0: 0, x1: 0.5 } : { x0: 0.5, x1: 1 }) : { x0: 0, x1: 1 };
+    p.target = mapToRect(pick.palm, r, cam, 0.12);
+  });
+  drawCamOverlay(perPlayer, used);
+}
+
+function drawCamOverlay(perPlayer, used) {
+  syncOverlay(camCtx.canvas, video);
+  const { width: w, height: h } = camCtx.canvas;
+  camCtx.clearRect(0, 0, w, h);
+  if (S.mode === "hands2") {
+    camCtx.strokeStyle = "rgba(255,255,255,0.35)"; camCtx.setLineDash([8, 8]); camCtx.lineWidth = 2;
+    camCtx.beginPath(); camCtx.moveTo(w / 2, 0); camCtx.lineTo(w / 2, h); camCtx.stroke();
+    camCtx.setLineDash([]);
+  }
+  perPlayer.forEach((hands, i) => {
+    drawHands(camCtx, hands.filter((hd) => !used[i].includes(hd)), "rgba(255,255,255,0.35)");
+    drawHands(camCtx, used[i], COLORS[i] + "dd");
+  });
+  $("cam-name").textContent = tracker.cameraLabel;
+}
+
+// ---------- Game state ----------
+const newPlayer = (usesHand, cpu = false) => ({
+  usesHand, cpu, score: 0, x: 0, y: 0, vx: 0, vy: 0, target: null, lastPalm: null, lostFor: 0, flash: 0,
+});
+const S = {
+  mode: null, running: false, paused: false, over: false, waiting: "",
+  players: [], puck: { x: 0, y: 0, vx: 0, vy: 0, trail: [] },
+  serveTimer: 0, message: "", particles: [], goalFlash: [0, 0], cpuAim: 0,
+};
+// Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
+window.handHockey = {
+  S, music, tracker, CFG, keys, makeHand, start: (mode) => startGame(mode),
+  setHands: (hands) => { injectedHands = hands; }, rink: () => rink(),
+  step: (dt = 1 / 60) => { if (S.running && S.mode !== "keys") updateHands(performance.now(), dt); update(dt); },
+};
+
+// Table geometry (recomputed from the window size so resizing mid-game works).
+function rink() {
+  const { W, H } = view, side = Math.max(14, Math.min(W, H) * 0.03), top = 50;
+  const r = { x: side, y: top, w: W - side * 2, h: H - top - side };
+  const puckR = clamp(Math.min(r.w, r.h) * 0.035, 12, 28);
+  return { ...r, mid: r.x + r.w / 2, goalH: r.h * 0.36, puckR, malletR: puckR * 1.75, maxSpeed: r.w * 1.7 };
+}
+const halfRect = (i) => { const r = rink(); return { x: i === 0 ? r.x : r.mid, y: r.y, w: r.w / 2, h: r.h }; };
+const inGoalMouth = (y, R) => Math.abs(y - (R.y + R.h / 2)) < R.goalH / 2;
+
+function startGame(mode) {
+  S.mode = mode;
+  S.players = [newPlayer(mode !== "keys"), newPlayer(mode === "hands2", mode === "cpu")];
+  const R = rink();
+  S.players.forEach((p, i) => { p.x = i === 0 ? R.x + R.w * 0.12 : R.x + R.w * 0.88; p.y = R.y + R.h / 2; });
+  Object.assign(S, { running: true, paused: false, over: false, particles: [], message: "", goalFlash: [0, 0] });
+  serve(-1);
+  keys.clear();
+  music.restart();
+  unlockAudio();
+  $("menu").classList.add("hidden");
+  $("gameover").classList.add("hidden");
+  $("hud").classList.remove("hidden");
+  $("cam-panel").classList.toggle("hidden", mode === "keys");
+  $("hud-help").innerHTML = mode === "keys"
+    ? `<span class="p1">P1</span> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> &nbsp;|&nbsp; <span class="p2">P2</span> <kbd>←↑↓→</kbd> &nbsp;|&nbsp; <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`
+    : `Move your hand = move your mallet · swing into the puck to shoot · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit`;
+}
+
+// Puts the puck on a side: -1 = centre (kick-off), 0 / 1 = in that player's half (they conceded).
+function serve(side) {
+  const R = rink(), pk = S.puck;
+  pk.x = side < 0 ? R.mid : side === 0 ? R.x + R.w * 0.3 : R.x + R.w * 0.7;
+  pk.y = R.y + R.h / 2; pk.vx = 0; pk.vy = 0; pk.trail = [];
+  S.serveTimer = 1.2;
+}
+
+function playerName(i) {
+  if (S.mode === "cpu") return i === 0 ? "You" : "Computer";
+  return `Player ${i + 1}`;
+}
+
+function goalFor(i) {
+  const p = S.players[i];
+  p.score++;
+  S.goalFlash[1 - i] = 1;
+  sfx("goal");
+  burst(S.puck.x, S.puck.y, COLORS[i], 40, view.H * 0.6);
+  if (p.score >= CFG.winScore) {
+    S.over = true;
+    sfx("win");
+    $("end-title").textContent = S.mode === "cpu" ? (i === 0 ? "You win! 🎉" : "Computer wins") : `${playerName(i)} wins! 🎉`;
+    $("end-title").className = i === 0 ? "p1" : "p2";
+    $("end-text").innerHTML = `<span class="p1">${S.players[0].score}</span> : <span class="p2">${S.players[1].score}</span>`;
+    setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, 700);
+    return;
+  }
+  S.message = `${playerName(i)} scores!`;
+  serve(1 - i); // the player who conceded gets the puck
+}
+
+function showMenu() {
+  S.running = false; S.over = false;
+  tracker.stop();
+  $("gameover").classList.add("hidden");
+  $("hud").classList.add("hidden");
+  $("cam-panel").classList.add("hidden");
+  $("menu").classList.remove("hidden");
+  setStatus("");
+}
+
+function burst(x, y, color, n = 14, speed = 220) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = (0.2 + Math.random() * 0.8) * speed;
+    S.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.3 + Math.random() * 0.4, max: 0.7, color });
+  }
+}
+
+// ---------- Update ----------
+function waitingReason() {
+  if (S.paused) return "Paused — press P";
+  if (S.mode === "keys") return "";
+  const handP = S.players.map((p, i) => ({ p, i })).filter(({ p }) => p.usesHand);
+  const lost = handP.filter(({ p }) => p.lostFor > CFG.lostGrace || !p.target);
+  if (lost.length === handP.length && tracker.dark) return tracker.lostMessage();
+  if (lost.length === 2) return "Both players: hold up a hand ✋ (sit side by side)";
+  if (lost.length === 1) {
+    const i = lost[0].i;
+    return S.mode === "cpu" ? tracker.lostMessage() : `${playerName(i)} (${i === 0 ? "left" : "right"}): hold up a hand ✋`;
+  }
+  return "";
+}
+
+// Where each mallet wants to be this frame.
+function malletGoal(p, i, R, dt) {
+  const half = halfRect(i), pk = S.puck;
+  if (p.usesHand) return p.target;
+  if (p.cpu) {
+    // Attack the puck from behind when it is on our side, otherwise guard the goal.
+    const ownSide = pk.x > R.mid - R.puckR;
+    if (Math.random() < dt * 1.5) S.cpuAim = (Math.random() - 0.5) * R.malletR;
+    // Puck behind the mallet: go round it via the side instead of knocking it into our own goal.
+    if (ownSide && pk.x > p.x - R.malletR * 0.5) return { x: pk.x + R.malletR * 2, y: pk.y + (pk.y < R.y + R.h / 2 ? 1 : -1) * R.malletR * 2.2 };
+    // Otherwise aim through the puck so the mallet arrives at full speed and shoots it.
+    if (ownSide) return { x: pk.x - R.malletR, y: pk.y + S.cpuAim * 0.4 };
+    return { x: R.x + R.w - R.w * 0.1, y: clamp(pk.y, R.y + R.h / 2 - R.goalH / 2, R.y + R.h / 2 + R.goalH / 2) };
+  }
+  const k = i === 0 ? ["KeyA", "KeyD", "KeyW", "KeyS"] : ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+  const sp = R.h * 1.3 * dt;
+  return {
+    x: clamp(p.x + (keys.has(k[1]) - keys.has(k[0])) * sp, half.x, half.x + half.w),
+    y: clamp(p.y + (keys.has(k[3]) - keys.has(k[2])) * sp, half.y, half.y + half.h),
+  };
+}
+
+function update(dt) {
+  for (const p of S.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.95; p.vy *= 0.95; p.life -= dt; }
+  S.particles = S.particles.filter((p) => p.life > 0);
+  S.goalFlash = S.goalFlash.map((g) => Math.max(0, g - dt * 1.5));
+
+  S.waiting = "";
+  if (!S.running || S.over) return;
+  S.waiting = waitingReason();
+  if (S.waiting) return;
+
+  const R = rink(), pk = S.puck, mr = R.malletR, pr = R.puckR;
+
+  // Mallets: move toward their goal point (CPU speed-limited), stay inside their own half.
+  const from = S.players.map((p) => ({ x: p.x, y: p.y }));
+  const to = S.players.map((p, i) => {
+    const g = malletGoal(p, i, R, dt), half = halfRect(i);
+    let x = g.x, y = g.y;
+    if (p.usesHand) { const k = 1 - Math.exp(-dt * 22); x = p.x + (x - p.x) * k; y = p.y + (y - p.y) * k; }
+    if (p.cpu) {
+      const maxD = R.h * [0.55, 0.85, 1.25][CFG.cpuSkill] * dt, d = Math.hypot(x - p.x, y - p.y);
+      if (d > maxD) { x = p.x + ((x - p.x) / d) * maxD; y = p.y + ((y - p.y) / d) * maxD; }
+    }
+    x = i === 0 ? clamp(x, half.x + mr, half.x + half.w - mr * 0.3) : clamp(x, half.x + mr * 0.3, half.x + half.w - mr);
+    y = clamp(y, half.y + mr, half.y + half.h - mr);
+    return { x, y };
+  });
+  S.players.forEach((p, i) => {
+    p.vx = (to[i].x - from[i].x) / dt; p.vy = (to[i].y - from[i].y) / dt;
+    p.flash = Math.max(0, p.flash - dt);
+  });
+
+  if (S.serveTimer > 0) {
+    S.serveTimer -= dt;
+    if (S.serveTimer <= 0) S.message = "";
+    S.players.forEach((p, i) => { p.x = to[i].x; p.y = to[i].y; });
+    return;
+  }
+
+  // Physics in sub-steps so a fast puck or mallet swing can't tunnel through.
+  const travel = Math.max(Math.hypot(pk.vx, pk.vy) * dt, ...S.players.map((p) => Math.hypot(p.vx, p.vy) * dt));
+  const steps = clamp(Math.ceil(travel / (pr * 0.5)), 1, 24), h = dt / steps;
+  for (let s = 1; s <= steps; s++) {
+    S.players.forEach((p, i) => { p.x = from[i].x + (to[i].x - from[i].x) * (s / steps); p.y = from[i].y + (to[i].y - from[i].y) * (s / steps); });
+    pk.x += pk.vx * h; pk.y += pk.vy * h;
+    for (const p of S.players) collide(p, R);
+    if (walls(R)) return;
+  }
+  const f = Math.exp(-CFG.friction * dt);
+  pk.vx *= f; pk.vy *= f;
+  pk.trail.push({ x: pk.x, y: pk.y }); if (pk.trail.length > 10) pk.trail.shift();
+}
+
+// Puck vs one mallet: the mallet is immovable, so the puck bounces off it and picks up its velocity.
+function collide(p, R) {
+  const pk = S.puck, minD = R.puckR + R.malletR;
+  const dx = pk.x - p.x, dy = pk.y - p.y, d = Math.hypot(dx, dy);
+  if (d >= minD) return;
+  const nx = d ? dx / d : 1, ny = d ? dy / d : 0;
+  pk.x = p.x + nx * minD; pk.y = p.y + ny * minD;
+  const vn = (pk.vx - p.vx) * nx + (pk.vy - p.vy) * ny;
+  if (vn >= 0) return;
+  pk.vx -= (1 + CFG.restitution) * vn * nx; pk.vy -= (1 + CFG.restitution) * vn * ny;
+  const sp = Math.hypot(pk.vx, pk.vy);
+  if (sp > R.maxSpeed) { pk.vx *= R.maxSpeed / sp; pk.vy *= R.maxSpeed / sp; }
+  if (-vn > R.h * 0.3) {
+    p.flash = 0.2;
+    sfx("puck");
+    if (-vn > R.h * 1.5) burst(pk.x, pk.y, "#ffd25e", 12, R.h * 0.4);
+  }
+}
+
+// Rink walls and goals. Returns true if a goal was scored.
+function walls(R) {
+  const pk = S.puck, r = R.puckR;
+  if (pk.y < R.y + r) { pk.y = R.y + r; pk.vy = Math.abs(pk.vy); bounceSound(); }
+  if (pk.y > R.y + R.h - r) { pk.y = R.y + R.h - r; pk.vy = -Math.abs(pk.vy); bounceSound(); }
+  for (const i of [0, 1]) {
+    const wallX = i === 0 ? R.x + r : R.x + R.w - r;
+    const past = i === 0 ? pk.x < wallX : pk.x > wallX;
+    if (!past) continue;
+    if (inGoalMouth(pk.y, R)) {
+      if (i === 0 ? pk.x < R.x - r : pk.x > R.x + R.w + r) { goalFor(1 - i); return true; }
+    } else {
+      pk.x = wallX; pk.vx = i === 0 ? Math.abs(pk.vx) : -Math.abs(pk.vx); bounceSound();
+    }
+  }
+  return false;
+}
+
+function bounceSound() { if (Math.hypot(S.puck.vx, S.puck.vy) > view.H * 0.2) sfx("wall"); }
+
+// ---------- Render ----------
+function render() {
+  const { W, H } = view;
+  ctx.fillStyle = "#050812";
+  ctx.fillRect(0, 0, W, H);
+  if (!S.running) return;
+  const R = rink(), cy = R.y + R.h / 2, pk = S.puck;
+
+  // table
+  const g = ctx.createLinearGradient(0, R.y, 0, R.y + R.h);
+  g.addColorStop(0, "#0d1a33"); g.addColorStop(1, "#0a1226");
+  ctx.fillStyle = g;
+  roundRect(R.x, R.y, R.w, R.h, 24); ctx.fill();
+  ctx.strokeStyle = "rgba(184,242,255,0.35)"; ctx.lineWidth = 4;
+  roundRect(R.x, R.y, R.w, R.h, 24); ctx.stroke();
+  // centre line + circle, goal creases
+  ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(R.mid, R.y); ctx.lineTo(R.mid, R.y + R.h); ctx.stroke();
+  ctx.beginPath(); ctx.arc(R.mid, cy, R.h * 0.15, 0, Math.PI * 2); ctx.stroke();
+  [0, 1].forEach((i) => {
+    const gx = i === 0 ? R.x : R.x + R.w;
+    ctx.strokeStyle = COLORS[i] + "55";
+    ctx.beginPath(); ctx.arc(gx, cy, R.goalH * 0.6, i === 0 ? -Math.PI / 2 : Math.PI / 2, i === 0 ? Math.PI / 2 : Math.PI * 1.5); ctx.stroke();
+    // goal mouth
+    ctx.shadowColor = COLORS[i]; ctx.shadowBlur = 20 + S.goalFlash[i] * 40;
+    ctx.strokeStyle = COLORS[i]; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.moveTo(gx, cy - R.goalH / 2); ctx.lineTo(gx, cy + R.goalH / 2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.lineWidth = 3;
+    if (S.goalFlash[i] > 0) {
+      ctx.fillStyle = COLORS[i === 0 ? 1 : 0] + Math.round(S.goalFlash[i] * 60).toString(16).padStart(2, "0");
+      ctx.fillRect(i === 0 ? R.x : R.mid, R.y, R.w / 2, R.h);
+    }
+  });
+
+  // scores
+  const scoreSize = Math.round(Math.min(W, H) * 0.1);
+  ctx.font = `800 ${scoreSize}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(94,224,255,0.3)"; ctx.fillText(S.players[0].score, R.x + R.w * 0.3, R.y + 14);
+  ctx.fillStyle = "rgba(255,94,168,0.3)"; ctx.fillText(S.players[1].score, R.x + R.w * 0.7, R.y + 14);
+  ctx.font = `600 13px system-ui, sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.fillText(playerName(0), R.x + R.w * 0.3, R.y + 18 + scoreSize);
+  ctx.fillText(playerName(1), R.x + R.w * 0.7, R.y + 18 + scoreSize);
+
+  // puck trail + puck
+  const fast = Math.hypot(pk.vx, pk.vy) > R.h * 1.2;
+  pk.trail.forEach((t, k) => {
+    ctx.globalAlpha = (k / pk.trail.length) * 0.3;
+    ctx.fillStyle = fast ? "#ffd25e" : "#ffffff";
+    ctx.beginPath(); ctx.arc(t.x, t.y, R.puckR * (0.5 + k / pk.trail.length / 2), 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+  ctx.shadowColor = fast ? "#ffd25e" : "#ffffff"; ctx.shadowBlur = fast ? 30 : 14;
+  ctx.fillStyle = "#1b1f2e";
+  ctx.beginPath(); ctx.arc(pk.x, pk.y, R.puckR, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = fast ? "#ffd25e" : "#e8ecff"; ctx.lineWidth = 3; ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // mallets
+  S.players.forEach((p, i) => {
+    const col = COLORS[i], r = R.malletR;
+    ctx.shadowColor = col; ctx.shadowBlur = 16 + p.flash * 80;
+    ctx.fillStyle = col + "33";
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 4; ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.45, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.5)";
+    ctx.beginPath(); ctx.arc(p.x - r * 0.12, p.y - r * 0.12, r * 0.15, 0, Math.PI * 2); ctx.fill();
+  });
+
+  for (const p of S.particles) {
+    ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+
+  if (S.waiting) drawBanner(ctx, W, H, S.waiting);
+  else if (S.serveTimer > 0) drawBanner(ctx, W, H, S.message || `Get ready… ${Math.ceil(S.serveTimer)}`, "#ffffff");
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+// ---------- Main loop ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.05);
+  if (dt <= 0) { requestAnimationFrame(frame); return; }
+  last = now;
+  if (S.running && S.mode !== "keys") updateHands(now, dt);
+  music.setPlaying(S.running && !S.over && !S.paused);
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ---------- Menu wiring ----------
+function setStatus(msg, isError = false) {
+  const el = $("status");
+  el.textContent = msg;
+  el.classList.toggle("error", isError);
+}
+
+const menuBtns = [$("btn-hands2"), $("btn-cpu"), $("btn-keys")];
+async function startWithCamera(mode) {
+  menuBtns.forEach((b) => (b.disabled = true));
+  unlockAudio();
+  try {
+    await tracker.start();
+    startGame(mode);
+  } catch (err) {
+    console.error(err);
+    setStatus(cameraErrorMessage(err), true);
+  } finally {
+    menuBtns.forEach((b) => (b.disabled = false));
+  }
+}
+$("btn-hands2").addEventListener("click", () => startWithCamera("hands2"));
+$("btn-cpu").addEventListener("click", () => startWithCamera("cpu"));
+$("btn-keys").addEventListener("click", () => { tracker.stop(); startGame("keys"); });
+$("btn-again").addEventListener("click", () => startGame(S.mode));
+$("btn-menu").addEventListener("click", showMenu);
+</script>
+</body>
+</html>

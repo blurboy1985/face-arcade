@@ -62,6 +62,12 @@ const SFX = {
   bubble: ["sine", 300, 900, 0.18, 0.08],
   pop:    ["square", 1200, 600, 0.07, 0.05],
   curve:  ["sine", 900, 300, 0.3, 0.08],
+  slice:  ["sawtooth", 1800, 500, 0.09, 0.05],
+  splat:  ["triangle", 260, 70, 0.14, 0.12],
+  combo:  ["square", 660, 1760, 0.25, 0.06],
+  tick:   ["square", 1000, 1000, 0.03, 0.04],
+  puck:   ["square", 520, 260, 0.06, 0.08],
+  goal:   ["sawtooth", 200, 900, 0.45, 0.09],
 };
 
 // One shared AudioContext for sound effects and music (null if Web Audio is unavailable).
