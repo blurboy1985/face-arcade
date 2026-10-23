@@ -14,7 +14,7 @@ Hand games:
 
 | Game | Players | Hands | Fallback |
 |---|---|---|---|
-| **Hand Ninja** — Fruit Ninja-style slicing duel | 2 (or 1) | index fingertip is your blade — swipe fast through fruit; 3+ in one swipe = combo; avoid bombs (−10, blade jams 1 s) | mouse / touch (solo) |
+| **Hand Ninja** — Fruit Ninja-style slicing duel | 2 (or 1) | index fingertip is your blade — swipe fast through fruit (it slices everything it sweeps through); 5 stages of rising speed, each ending in a boss to slash before it escapes; power orbs: ❄ freeze, ⚡ mega blade, ×2 points, 🍉 fruit frenzy; streak multiplier up to ×4; avoid bombs (−10, blade jams 1 s) | mouse / touch (solo) |
 | **Hand Hockey** — air hockey | 2 (or vs computer) | your palm moves your mallet in your half; swing into the puck for a hard shot | P1 WASD — P2 arrows |
 
 Pick a game on the start screen (`index.html`).
