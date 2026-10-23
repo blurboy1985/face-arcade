@@ -8,11 +8,11 @@
 <style>
   #hud { justify-content: center; }
   #hud .small { text-align: center; }
-  #cam-panel { left: 50%; right: auto; transform: translateX(-50%); width: 220px; }
+  #cam-panel { left: 50%; right: auto; transform: translateX(-50%); width: 200px; opacity: 0.9; }
   .card h1 { background: linear-gradient(90deg, #ffd25e, #ff5e5e); -webkit-background-clip: text; background-clip: text; }
   .p1 { color: #5ee0ff; } .p2 { color: #ff5ea8; }
   canvas#game { touch-action: none; }
-  @media (max-width: 600px) { #cam-panel { width: 140px; } }
+  @media (max-width: 600px) { #cam-panel { width: 130px; } }
 </style>
 </head>
 <body>
@@ -33,9 +33,9 @@
 <div id="menu" class="screen">
   <div class="card">
     <h1>Hand Ninja</h1>
-    <p>Your <b>index finger is a blade</b>. Swipe fast through the fruit to slice it — but don't touch the <b>bombs</b>!<br>
-      Two players sit side by side: <b class="p1">left player</b> slices the left half, <b class="p2">right player</b> the right half.
-      Both get exactly the same fruit. Highest score when the time runs out wins.</p>
+    <p>Your <b>index finger is a blade</b> — swipe fast through the fruit, avoid the <b>bombs</b>.<br>
+      Fight through <b>5 stages</b> that get faster and harder. Each stage ends with a <b>boss</b> — slash it again and again before it escapes!<br>
+      Two players sit side by side: <b class="p1">left player</b> plays the left half, <b class="p2">right player</b> the right half, with exactly the same fruit and bosses.</p>
     <div class="btns">
       <button id="btn-hands2">2 Players — webcam (hands)</button>
       <button id="btn-hands1" class="secondary">1 Player — webcam (hands)</button>
@@ -47,14 +47,18 @@
         <input id="music-toggle" type="checkbox" checked></label>
       <label>Camera
         <select id="cam-select"><option value="auto">Auto (skip virtual cameras)</option></select></label>
-      <label>Round length <span id="round-val">60 s</span>
-        <input id="round" type="range" min="30" max="120" step="15" value="60"></label>
+      <label>Stage length (before the boss) <span id="stage-val">30 s</span>
+        <input id="stage-len" type="range" min="15" max="60" step="5" value="30"></label>
+      <label>Start at stage <span id="start-val">1 · Orchard</span>
+        <input id="start-stage" type="range" min="1" max="5" step="1" value="1"></label>
       <label>Swipe speed needed <span id="swipe-val">1.0×</span>
         <input id="swipe" type="range" min="0.5" max="2" step="0.1" value="1"></label>
     </div>
     <div class="help">
-      Fruit +1 · <b style="color:#ffd25e">golden fruit</b> +5 · 3+ fruit in one swipe = combo bonus · bomb −10 and your blade jams for a second.<br>
-      Webcam: raise one or both hands toward the camera; sit far enough back that both players fit in the preview.<br>
+      Slice glowing orbs for powers: <b style="color:#74c0fc">❄ Freeze</b> slow-mo · <b style="color:#ffd43b">⚡ Mega blade</b> huge blade, double boss damage ·
+      <b style="color:#69db7c">×2</b> double points · <b style="color:#ff6b6b">🍉 Frenzy</b> fruit shower.<br>
+      Slice fruit in a row to build a streak (up to ×4 points) — a missed fruit resets it. 3+ fruit in one swipe = combo bonus.
+      Bomb −10 and your blade jams for a second.<br>
       Video stays on your computer; nothing is uploaded.
     </div>
     <a class="back" href="index.html">← All games</a>
@@ -63,7 +67,7 @@
 
 <div id="gameover" class="screen hidden">
   <div class="card">
-    <h2 id="end-title">Time's up!</h2>
+    <h2 id="end-title">Game over</h2>
     <p id="end-text"></p>
     <div class="btns">
       <button id="btn-again">Play again</button>
@@ -85,19 +89,52 @@ const BEST_KEY = "handNinjaBest";
 
 // ---------- Settings ----------
 const CFG = {
-  round: 60,        // seconds per round
+  stageTime: 30,    // seconds of fruit before each boss
+  startStage: 1,
   swipe: 1,         // multiplier on the blade speed needed to slice
   minSpeed: 1.1,    // base slicing speed, in screen heights per second
+  bladeR: 0.035,    // blade hit radius, as a fraction of the smaller screen side
   bladeLife: 0.16,  // seconds a blade trail stays visible
   lostGrace: 1,     // seconds a player's hands may vanish before the "show your hand" hint
   bombPenalty: 10, stun: 1,
+  bossTime: 30,     // seconds to beat a boss before it escapes
+  bossHitCd: 0.22,  // one blade can hit a boss at most this often
+  streakStep: 8,    // fruit in a row per +1 multiplier (max ×4)
 };
-$("round").addEventListener("input", (e) => { CFG.round = +e.target.value; $("round-val").textContent = CFG.round + " s"; });
+
+// Difficulty rises stage by stage (and ramps a little within each stage).
+const STAGES = [
+  { name: "Orchard",       gap: 1.5,  maxItems: 3, bomb: 0.05, speed: 1.0,  power: 0.12, bg: ["#2a1a10", "#140b06"] },
+  { name: "Market",        gap: 1.3,  maxItems: 4, bomb: 0.09, speed: 1.08, power: 0.13, bg: ["#2b1830", "#120916"] },
+  { name: "Jungle",        gap: 1.15, maxItems: 4, bomb: 0.12, speed: 1.16, power: 0.14, bg: ["#10301c", "#06140b"] },
+  { name: "Volcano",       gap: 1.0,  maxItems: 5, bomb: 0.15, speed: 1.24, power: 0.15, bg: ["#3a120a", "#170604"] },
+  { name: "Dragon's Peak", gap: 0.9,  maxItems: 6, bomb: 0.18, speed: 1.32, power: 0.16, bg: ["#1d1240", "#0a0618"] },
+];
+
+// One boss per stage. move: drift / bounce / teleport; extras: shield, bomb throwing, fruit minions.
+const BOSSES = [
+  { name: "King Melon", hp: 8, rind: "#2b8a3e", light: "#69db7c", flesh: "#ff4d5e", juice: "#ff4d5e", deco: "stripes", stripes: "#1b5e2a", move: "drift", speed: 0.8, crown: true },
+  { name: "Pineapple Brute", hp: 12, rind: "#d99a00", light: "#ffe066", flesh: "#fff3a0", juice: "#ffe066", deco: "crosshatch", move: "bounce", speed: 0.35, leaves: true },
+  { name: "Coconut Golem", hp: 16, rind: "#5c3d1e", light: "#a07850", flesh: "#fffaf0", juice: "#f1f3f5", deco: "hair", move: "drift", speed: 1.1, shield: true },
+  { name: "Durian Dragon", hp: 20, rind: "#8a9a1b", light: "#d8e86a", flesh: "#fff3bf", juice: "#e9f5a0", deco: "spikes", move: "bounce", speed: 0.45, bombs: 2.6 },
+  { name: "Dragonfruit Overlord", hp: 26, rind: "#d6336c", light: "#ff8fb8", flesh: "#f8f9fa", juice: "#ff8fb8", deco: "scales", move: "teleport", speed: 2.6, bombs: 2.2, minions: 5, crown: true },
+];
+
+const POWERS = {
+  freeze: { icon: "❄", color: "#74c0fc", time: 5, label: "Freeze!" },
+  mega:   { icon: "⚡", color: "#ffd43b", time: 6, label: "Mega blade!" },
+  double: { icon: "×2", color: "#69db7c", time: 8, label: "Double points!" },
+  frenzy: { icon: "🍉", color: "#ff6b6b", time: 2.5, label: "Fruit frenzy!" },
+};
+const POWER_NAMES = Object.keys(POWERS);
+
+$("stage-len").addEventListener("input", (e) => { CFG.stageTime = +e.target.value; $("stage-val").textContent = CFG.stageTime + " s"; });
+$("start-stage").addEventListener("input", (e) => { CFG.startStage = +e.target.value; $("start-val").textContent = `${CFG.startStage} · ${STAGES[CFG.startStage - 1].name}`; });
 $("swipe").addEventListener("input", (e) => { CFG.swipe = +e.target.value; $("swipe-val").textContent = CFG.swipe.toFixed(1) + "×"; });
 
 // Fruit look-up: rind / highlight / flesh colours, size factor, points.
 const FRUITS = [
-  { name: "watermelon", rind: "#2b8a3e", light: "#69db7c", flesh: "#ff4d5e", juice: "#ff4d5e", stripes: "#1b5e2a", size: 1.25, pts: 1 },
+  { name: "watermelon", rind: "#2b8a3e", light: "#69db7c", flesh: "#ff4d5e", juice: "#ff4d5e", stripes: "#1b5e2a", size: 1.2, pts: 1 },
   { name: "orange", rind: "#f08c00", light: "#ffc078", flesh: "#ffb347", juice: "#ffa94d", size: 1, pts: 1 },
   { name: "apple", rind: "#c92a2a", light: "#ff8787", flesh: "#fff3bf", juice: "#ffec99", size: 0.95, pts: 1 },
   { name: "lemon", rind: "#f5c400", light: "#fff3a0", flesh: "#fff9c4", juice: "#ffe066", size: 0.9, pts: 1 },
@@ -105,7 +142,8 @@ const FRUITS = [
   { name: "plum", rind: "#6a2c91", light: "#b57edc", flesh: "#e599f7", juice: "#cc5de8", size: 0.85, pts: 1 },
 ];
 const GOLD = { name: "gold", rind: "#e8a500", light: "#fff3b0", flesh: "#fff8d6", juice: "#ffd25e", size: 1, pts: 5, golden: true };
-const BOMB = { name: "bomb", bomb: true, size: 1 };
+const BOMB = { name: "bomb", bomb: true, size: 0.95 };
+const powerType = (name) => ({ name, power: name, size: 0.85, ...POWERS[name] });
 
 // ---------- Input ----------
 const keys = trackKeys((code) => {
@@ -163,26 +201,37 @@ function drawCamOverlay(perPlayer) {
 }
 
 // ---------- Game state ----------
-const newPlayer = () => ({ score: 0, blades: [], stun: 0, lostFor: 0, seen: false, sliced: 0, bestCombo: 0, bombs: 0 });
+const newPlayer = () => ({
+  score: 0, blades: [], stun: 0, lostFor: 0, seen: false, sliced: 0, bestCombo: 0, bombs: 0,
+  streak: 0, powers: {}, frenzyT: 0, frenzyNext: 0, bosses: 0,
+});
+// Phases: ready (countdown) → intro → fruit → bossIntro → boss → clear → next stage's intro … → game over.
 const S = {
   mode: null, running: false, paused: false, over: false, waiting: "",
-  phase: "ready", readyTimer: 3, timeLeft: 60, elapsed: 0, clock: 0,
-  players: [], lanes: [], rng: Math.random, nextWaveAt: 0, waveNo: 0,
-  particles: [], halves: [], stains: [], popups: [], lastTick: 0,
+  phase: "ready", readyTimer: 3, stage: 0, firstStage: 0, phaseT: 0, playT: 0, clock: 0,
+  players: [], lanes: [], rng: Math.random, nextWaveAt: 0, bossSeed: 0, lastTick: 0,
+  particles: [], halves: [], stains: [], popups: [],
 };
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
 window.handNinja = {
-  S, music, tracker, CFG, makeHand, start: (mode) => startGame(mode),
+  S, music, tracker, CFG, STAGES, BOSSES, POWERS, makeHand, start: (mode) => startGame(mode),
   setHands: (hands) => { injectedHands = hands; },
+  goto: (stage, phase = "intro") => { S.stage = stage - 1; setPhase(phase); },
+  laneRect: (i) => laneRect(S.lanes[i]), fruitR: (i, t) => fruitR(S.lanes[i], t), bossR: (i) => bossR(S.lanes[i]),
   step: (dt = 1 / 60) => { tick(performance.now(), dt); },
 };
 
 // Lanes are stored as fractions of the screen so a window resize mid-game just works.
 const laneRect = (lane) => ({ x: lane.f0 * view.W, y: 0, w: (lane.f1 - lane.f0) * view.W, h: view.H });
-const fruitR = (lane, type) => clamp(Math.min(laneRect(lane).w, view.H) * 0.055, 20, 48) * type.size;
+const fruitR = (lane, type) => clamp(Math.min(laneRect(lane).w, view.H) * 0.095, 32, 90) * type.size;
+const bossR = (lane) => clamp(Math.min(laneRect(lane).w, view.H) * 0.17, 70, 160);
 const gravity = () => view.H * 1.25;
+const hasPower = (p, name) => (p.powers[name] || 0) > 0;
+const bladeR = (p) => Math.min(view.W, view.H) * CFG.bladeR * (hasPower(p, "mega") ? 2.5 : 1);
+const streakMult = (p) => 1 + Math.min(3, Math.floor(p.streak / CFG.streakStep));
+const playerOf = (lane) => S.players[lane.player];
 
-// Small seeded RNG so both lanes in a duel get exactly the same fruit.
+// Small seeded RNG so both lanes in a duel get exactly the same fruit and boss moves.
 function mulberry32(seed) {
   return () => {
     seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
@@ -197,11 +246,12 @@ function startGame(mode) {
   const two = mode === "hands2";
   S.players = two ? [newPlayer(), newPlayer()] : [newPlayer()];
   S.lanes = two ? [{ f0: 0, f1: 0.5, player: 0 }, { f0: 0.5, f1: 1, player: 1 }] : [{ f0: 0, f1: 1, player: 0 }];
-  S.lanes.forEach((l) => { l.fruits = []; l.pending = []; });
+  S.lanes.forEach((l) => Object.assign(l, { fruits: [], pending: [], boss: null, bossDone: false, flash: 0, rng: Math.random }));
   Object.assign(S, {
-    running: true, paused: false, over: false, phase: "ready", readyTimer: 3, timeLeft: CFG.round,
-    elapsed: 0, clock: 0, rng: mulberry32((Math.random() * 2 ** 31) | 0), nextWaveAt: 0.3, waveNo: 0,
-    particles: [], halves: [], stains: [], popups: [], lastTick: 0,
+    running: true, paused: false, over: false, phase: "ready", readyTimer: 3,
+    stage: CFG.startStage - 1, firstStage: CFG.startStage - 1, phaseT: 0, playT: 0, clock: 0,
+    rng: mulberry32((Math.random() * 2 ** 31) | 0), nextWaveAt: 0, lastTick: 0,
+    particles: [], halves: [], stains: [], popups: [],
   });
   pointers.clear();
   keys.clear();
@@ -227,31 +277,160 @@ function showMenu() {
 
 const playerName = (i) => (S.players.length === 1 ? "You" : `Player ${i + 1}`);
 
+// ---------- Phases ----------
+function setPhase(phase) {
+  S.phase = phase; S.phaseT = 0; S.lastTick = 0;
+  if (phase === "intro") {
+    S.lanes.forEach((l) => { l.boss = null; l.bossDone = false; });
+    sfx("combo");
+  } else if (phase === "fruit") {
+    S.nextWaveAt = S.playT + 0.3;
+  } else if (phase === "bossIntro") {
+    // Every lane gets the same boss driven by the same seed, so a duel stays fair.
+    S.bossSeed = (S.rng() * 2 ** 31) | 0;
+    S.lanes.forEach((l) => { l.rng = mulberry32(S.bossSeed); l.boss = makeBoss(l); l.bossDone = false; });
+    sfx("goal");
+  } else if (phase === "boss") {
+    S.nextWaveAt = S.playT + 3;
+  }
+}
+
+function stepPhase(dt) {
+  S.phaseT += dt;
+  const left = (S.phase === "fruit" ? CFG.stageTime : CFG.bossTime) - S.phaseT;
+  if ((S.phase === "fruit" || S.phase === "boss") && left <= 5 && left > 0 && Math.ceil(left) !== S.lastTick) { S.lastTick = Math.ceil(left); sfx("tick"); }
+  switch (S.phase) {
+    case "intro": if (S.phaseT >= 2.2) setPhase("fruit"); break;
+    case "fruit":
+      if (left > 1) spawnWaves(false);
+      if (left <= 0) setPhase("bossIntro");
+      break;
+    case "bossIntro": if (S.phaseT >= 2.4) setPhase("boss"); break;
+    case "boss":
+      spawnWaves(true);
+      if (S.lanes.every((l) => l.bossDone) || left <= 0) {
+        for (const l of S.lanes) {
+          if (l.bossDone || !l.boss) continue;
+          l.boss.leaving = true; l.bossDone = true;
+          popup(laneRect(l).x + laneRect(l).w / 2, view.H * 0.3, `${l.boss.def.name} escaped!`, "#ff8787", 2);
+        }
+        setPhase("clear");
+      }
+      break;
+    case "clear":
+      if (S.phaseT >= 2.8) { if (S.stage + 1 < STAGES.length) { S.stage++; setPhase("intro"); } else endGame(); }
+      break;
+  }
+}
+
 // ---------- Waves ----------
+function spawnWaves(light) {
+  if (S.playT < S.nextWaveAt) return;
+  const wave = makeWave(light);
+  S.nextWaveAt = S.playT + wave.gap;
+  for (const lane of S.lanes) for (const it of wave.items) lane.pending.push({ at: S.playT + it.delay, it });
+}
+
 // A wave is generated once from the shared RNG, then launched into every lane.
-function makeWave() {
-  const r = S.rng, progress = clamp(S.elapsed / CFG.round, 0, 1);
-  const count = 1 + Math.floor(r() * (2 + progress * 3));
-  const bombChance = 0.08 + progress * 0.12;
+// Light waves keep some fruit coming during boss fights (no bombs — the bosses bring their own).
+function makeWave(light) {
+  const r = S.rng, st = STAGES[S.stage], progress = light ? 0 : clamp(S.phaseT / CFG.stageTime, 0, 1);
+  const maxItems = light ? 2 : st.maxItems;
+  const count = clamp(1 + Math.floor(r() * maxItems * (0.6 + 0.4 * progress)), 1, maxItems);
+  const bombChance = light ? 0 : st.bomb * (0.7 + 0.6 * progress);
+  const powerAt = r() < st.power ? Math.floor(r() * count) : -1;
   let gold = false;
   const items = [];
   for (let k = 0; k < count; k++) {
     let type = FRUITS[Math.floor(r() * FRUITS.length)];
     const roll = r();
-    if (roll < bombChance && k > 0) type = BOMB; // never a wave of only a bomb
+    if (k === powerAt) type = powerType(POWER_NAMES[Math.floor(r() * POWER_NAMES.length)]);
+    else if (roll < bombChance && k > 0) type = BOMB; // never a wave of only a bomb
     else if (roll > 0.965 && !gold) { type = GOLD; gold = true; }
-    const u = 0.12 + r() * 0.76;
-    items.push({ type, u, uEnd: 0.25 + r() * 0.5, apex: 0.1 + r() * 0.35, delay: r() * 0.3 * k, spin: (r() - 0.5) * 6 });
+    items.push({ type, u: 0.15 + r() * 0.7, uEnd: 0.25 + r() * 0.5, apex: 0.12 + r() * 0.33, delay: r() * 0.3 * k, spin: (r() - 0.5) * 6 });
   }
-  return { items, gap: 1.45 - progress * 0.65 + r() * 0.35 };
+  return { items, gap: st.gap * (1 - 0.25 * progress) * (light ? 2.2 : 1) + r() * 0.3 };
 }
 
+// Launches a fruit from below the lane so it peaks at `apex` (fraction of the screen from the top).
+// Later stages use stronger gravity: same arc height, but faster fruit.
 function launch(lane, it) {
-  const g = gravity(), H = view.H, r = fruitR(lane, it.type);
+  const g = gravity() * STAGES[S.stage].speed ** 2, H = view.H, r = fruitR(lane, it.type);
   const vy = -Math.sqrt(2 * g * (H + r - it.apex * H));
   const air = (2 * -vy) / g;
-  lane.fruits.push({ type: it.type, u: it.u, vu: (it.uEnd - it.u) / air, y: H + r, vy, rot: 0, spin: it.spin, age: 0 });
+  lane.fruits.push({ type: it.type, u: it.u, vu: (it.uEnd - it.u) / air, y: H + r, vy, g, rot: 0, spin: it.spin });
   if (it.type.bomb) sfx("tick");
+}
+
+// Throws an item out of a boss (bombs, fruit minions).
+function throwFromBoss(lane, type) {
+  const b = lane.boss, r = lane.rng, g = gravity() * STAGES[S.stage].speed ** 2;
+  lane.fruits.push({ type, u: b.u, vu: (r() - 0.5) * 0.8, y: b.v * view.H, vy: -view.H * (0.35 + r() * 0.5), g, rot: 0, spin: (r() - 0.5) * 6 });
+}
+
+// ---------- Bosses ----------
+function makeBoss(lane) {
+  const def = BOSSES[S.stage], r = lane.rng;
+  return {
+    def, hp: def.hp, u: 0.5, v: 1.35, t: 0, rot: 0,
+    vu: (r() < 0.5 ? -1 : 1) * def.speed, vv: (r() < 0.5 ? -1 : 1) * def.speed * 0.7,
+    teleT: def.speed, attackT: def.bombs || 0, minionT: 4, hitT: 0, alpha: 1, dead: false, leaving: false,
+  };
+}
+
+const bossShielded = (b) => b.def.shield && b.t % 5 > 3.4;
+
+function updateBoss(lane, dt) {
+  const b = lane.boss;
+  if (!b || b.dead) return;
+  b.hitT = Math.max(0, b.hitT - dt);
+  if (S.phase === "bossIntro") { b.v += (0.42 - b.v) * (1 - Math.exp(-dt * 3)); return; }
+  b.t += dt; // starts with the fight, so movement picks up smoothly from the entrance spot
+  if (b.leaving) { b.v -= dt * 0.9; b.alpha = clamp(b.alpha - dt * 0.6, 0, 1); return; }
+  const d = b.def, r = lane.rng;
+  if (d.move === "drift") {
+    b.u = 0.5 + 0.28 * Math.sin(b.t * 0.8 * d.speed);
+    b.v = 0.42 + 0.1 * Math.sin(b.t * 1.3 * d.speed);
+  } else if (d.move === "bounce") {
+    b.u += b.vu * dt; b.v += b.vv * dt;
+    if (b.u < 0.25 || b.u > 0.75) { b.u = clamp(b.u, 0.25, 0.75); b.vu = -b.vu; }
+    if (b.v < 0.25 || b.v > 0.62) { b.v = clamp(b.v, 0.25, 0.62); b.vv = -b.vv; }
+  } else {
+    b.teleT -= dt;
+    if (b.teleT <= 0) { b.teleT = d.speed; b.u = 0.25 + r() * 0.5; b.v = 0.25 + r() * 0.35; burst(laneRect(lane).x + b.u * laneRect(lane).w, b.v * view.H, d.juice, 16, view.H * 0.3); }
+    b.alpha = clamp(Math.min(b.teleT, d.speed - b.teleT) / 0.3, 0.2, 1);
+  }
+  if (d.bombs && (b.attackT -= dt) <= 0) { b.attackT = d.bombs; throwFromBoss(lane, BOMB); }
+  if (d.minions && (b.minionT -= dt) <= 0) {
+    b.minionT = 6;
+    for (let k = 0; k < Math.ceil(d.minions / 2); k++) throwFromBoss(lane, FRUITS[Math.floor(r() * FRUITS.length)]);
+  }
+}
+
+function hitBoss(pi, lane, blade, x, y) {
+  const p = S.players[pi], b = lane.boss;
+  blade.bossCd = CFG.bossHitCd;
+  if (bossShielded(b)) { burst(x, y, "#dee2e6", 10, view.H * 0.3); popup(x, y - bossR(lane) - 10, "blocked!", "#dee2e6", 0.6); sfx("bump"); return; }
+  const dmg = hasPower(p, "mega") ? 2 : 1;
+  b.hp = Math.max(0, b.hp - dmg); b.hitT = 0.15;
+  award(p, dmg);
+  burst(x, y, b.def.juice, 14, view.H * 0.4);
+  S.stains.push({ x, y, r: bossR(lane) * 0.5, color: b.def.juice, life: 2 });
+  sfx("slice"); sfx("splat");
+  if (b.hp <= 0) defeatBoss(pi, lane, x, y);
+}
+
+function defeatBoss(pi, lane, x, y) {
+  const p = S.players[pi], b = lane.boss, R = bossR(lane);
+  b.dead = true; lane.bossDone = true; p.bosses++;
+  const bonus = award(p, 20 * (S.stage + 1) + Math.ceil(Math.max(0, CFG.bossTime - S.phaseT)));
+  const rect = laneRect(lane), bx = rect.x + b.u * rect.w, by = b.v * view.H;
+  for (const side of [1, -1]) S.halves.push({ type: b.def, x: bx, y: by, r: R, rot: side < 0 ? Math.PI : 0, vx: side * view.H * 0.15, vy: -view.H * 0.3 * side, spin: side * 1.5, life: 2.2 });
+  burst(bx, by, b.def.juice, 60, view.H * 0.8);
+  burst(bx, by, "#ffd25e", 30, view.H * 0.5);
+  popup(bx, by - R - 20, `${b.def.name} defeated! +${bonus}`, "#ffd25e", 2.2);
+  lane.flash = 0.4;
+  sfx("win");
 }
 
 // ---------- Blades ----------
@@ -267,12 +446,13 @@ function updateBlades(pi, points, dt) {
       if (d < bd) { bd = d; best = b; }
     }
     if (best && bd < maxJump) { free.splice(free.indexOf(best), 1); moveBlade(pi, best, pt); }
-    else p.blades.push({ trail: [{ x: pt.x, y: pt.y, t: S.clock }], lastMove: S.clock, missing: 0, speed: 0, combo: 0, comboT: 0 });
+    else p.blades.push({ trail: [{ x: pt.x, y: pt.y, t: S.clock }], lastMove: S.clock, missing: 0, speed: 0, combo: 0, comboT: 0, bossCd: 0 });
   }
   for (const b of free) b.missing += dt;
   p.blades = p.blades.filter((b) => b.missing < 0.25);
   for (const b of p.blades) {
     while (b.trail.length > 1 && S.clock - b.trail[0].t > CFG.bladeLife) b.trail.shift();
+    b.bossCd = Math.max(0, b.bossCd - dt);
     if (b.comboT > 0 && (b.comboT -= dt) <= 0) endCombo(pi, b);
   }
 }
@@ -287,7 +467,8 @@ function moveBlade(pi, b, pt) {
   b.speed = d / clamp(S.clock - b.lastMove, 1 / 120, 0.1);
   b.lastMove = S.clock;
   b.trail.push({ x: pt.x, y: pt.y, t: S.clock });
-  if (S.phase === "play" && S.players[pi].stun <= 0 && b.speed >= CFG.minSpeed * CFG.swipe * view.H) sliceAlong(pi, b, last, pt);
+  const p = S.players[pi], need = CFG.minSpeed * CFG.swipe * view.H * (hasPower(p, "mega") ? 0.4 : 1);
+  if (S.phase !== "ready" && p.stun <= 0 && b.speed >= need) sliceAlong(pi, b, last, pt);
 }
 
 // Distance from point (px, py) to the segment a→b.
@@ -297,21 +478,38 @@ function segDist(px, py, a, b) {
   return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
 }
 
+// Slices everything the swipe segment touches (the blade has its own radius, so one swipe through a
+// cluster gets all of it), then hits the boss if it's in the way.
 function sliceAlong(pi, blade, a, b) {
-  const lane = S.lanes.find((l) => l.player === pi);
-  const rect = laneRect(lane), angle = Math.atan2(b.y - a.y, b.x - a.x);
+  const lane = S.lanes.find((l) => l.player === pi), p = S.players[pi];
+  const rect = laneRect(lane), angle = Math.atan2(b.y - a.y, b.x - a.x), reach = bladeR(p);
   for (const f of [...lane.fruits]) {
     const x = rect.x + f.u * rect.w, r = fruitR(lane, f.type);
-    if (segDist(x, f.y, a, b) > r * 1.05) continue;
+    if (segDist(x, f.y, a, b) > r + reach) continue;
     lane.fruits.splice(lane.fruits.indexOf(f), 1);
     if (f.type.bomb) { hitBomb(pi, x, f.y); return; }
-    sliceFruit(pi, blade, f, x, r, angle, rect);
+    if (f.type.power) activatePower(pi, f.type.power, x, f.y, r);
+    else sliceFruit(pi, blade, f, x, r, angle, rect);
   }
+  const boss = lane.boss;
+  if (boss && !boss.dead && !boss.leaving && S.phase === "boss" && blade.bossCd <= 0) {
+    const bx = rect.x + boss.u * rect.w, by = boss.v * view.H;
+    if (segDist(bx, by, a, b) <= bossR(lane) + reach) hitBoss(pi, lane, blade, bx, by);
+  }
+}
+
+// Adds points with the double-points power applied; returns what was added.
+function award(p, base) {
+  const pts = base * (hasPower(p, "double") ? 2 : 1);
+  p.score += pts;
+  return pts;
 }
 
 function sliceFruit(pi, blade, f, x, r, angle, rect) {
   const p = S.players[pi], t = f.type;
-  p.score += t.pts; p.sliced++;
+  const pts = award(p, t.pts * streakMult(p));
+  p.sliced++; p.streak++;
+  if (p.streak % CFG.streakStep === 0 && p.streak <= CFG.streakStep * 3) popup(x, f.y - r - 26, `streak ×${streakMult(p)}!`, "#69db7c", 1.2);
   blade.combo++; blade.comboT = 0.3;
   const vx = f.vu * rect.w, nx = Math.cos(angle + Math.PI / 2), ny = Math.sin(angle + Math.PI / 2), sep = view.H * 0.18;
   for (const side of [1, -1]) {
@@ -319,25 +517,35 @@ function sliceFruit(pi, blade, f, x, r, angle, rect) {
   }
   burst(x, f.y, t.juice, t.golden ? 30 : 16, view.H * 0.35);
   S.stains.push({ x, y: f.y, r: r * rand(1.1, 1.6), color: t.juice, life: 2.5 });
-  popup(x, f.y - r, `+${t.pts}`, t.golden ? "#ffd25e" : "#ffffff");
+  popup(x, f.y - r, `+${pts}`, t.golden ? "#ffd25e" : "#ffffff");
   sfx("slice"); sfx("splat");
   if (t.golden) sfx("coin");
+}
+
+function activatePower(pi, name, x, y, r) {
+  const p = S.players[pi], pw = POWERS[name];
+  p.powers[name] = pw.time;
+  if (name === "frenzy") { p.frenzyT = pw.time; p.frenzyNext = 0; }
+  burst(x, y, pw.color, 40, view.H * 0.5);
+  popup(x, y - r, pw.label, pw.color, 1.6);
+  sfx("shield");
 }
 
 function endCombo(pi, b) {
   const p = S.players[pi], n = b.combo;
   b.combo = 0;
   if (n < 3) return;
-  p.score += n; p.bestCombo = Math.max(p.bestCombo, n);
+  const pts = award(p, n);
+  p.bestCombo = Math.max(p.bestCombo, n);
   const last = b.trail[b.trail.length - 1];
-  popup(last.x, last.y - 30, `${n} fruit combo +${n}`, "#ffd25e", 1.3);
+  popup(last.x, last.y - 30, `${n} fruit combo +${pts}`, "#ffd25e", 1.3);
   sfx("combo");
 }
 
 function hitBomb(pi, x, y) {
   const p = S.players[pi];
   p.score = Math.max(0, p.score - CFG.bombPenalty); p.bombs++;
-  p.stun = CFG.stun;
+  p.stun = CFG.stun; p.streak = 0;
   p.blades.forEach((b) => { b.combo = 0; b.comboT = 0; });
   burst(x, y, "#ffffff", 30, view.H * 0.6);
   burst(x, y, "#ff6b3d", 30, view.H * 0.45);
@@ -349,7 +557,7 @@ function hitBomb(pi, x, y) {
 function burst(x, y, color, n = 14, speed = 220) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, s = rand(0.2, 1) * speed;
-    S.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.8), max: 0.8, color, size: rand(3, 7) });
+    S.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.8), max: 0.8, color, size: rand(3, 8) });
   }
 }
 
@@ -360,7 +568,7 @@ function waitingReason() {
   if (S.paused) return "Paused — press P";
   if (S.mode === "mouse") return "";
   if (tracker.dark && S.players.every((p) => p.lostFor > CFG.lostGrace)) return tracker.lostMessage();
-  // Before the round starts, everyone must have shown a hand once.
+  // Before the game starts, everyone must have shown a hand once.
   if (S.phase === "ready") {
     const missing = S.players.map((p, i) => (p.lostFor > 0.2 || !p.seen ? i : -1)).filter((i) => i >= 0);
     if (missing.length === 2) return "Both players: raise a hand toward the camera ✋";
@@ -379,6 +587,7 @@ function tick(now, dt) {
     if (inputs[i].length) { p.lostFor = 0; p.seen = true; } else p.lostFor += dt;
     updateBlades(i, inputs[i], dt);
     p.stun = Math.max(0, p.stun - dt);
+    for (const k of POWER_NAMES) if (p.powers[k] > 0) p.powers[k] = Math.max(0, p.powers[k] - dt);
   });
   S.waiting = waitingReason();
   updateEffects(dt);
@@ -386,31 +595,36 @@ function tick(now, dt) {
 
   if (S.phase === "ready") {
     S.readyTimer -= dt;
-    if (S.readyTimer <= 0) { S.phase = "play"; sfx("combo"); }
+    if (S.readyTimer <= 0) setPhase("intro");
     return;
   }
+  S.playT += dt;
+  stepPhase(dt);
+  if (!S.over) updateLanes(dt);
+}
 
-  // Round clock + last-seconds ticks
-  S.elapsed += dt;
-  S.timeLeft -= dt;
-  const secs = Math.ceil(S.timeLeft);
-  if (secs <= 5 && secs > 0 && secs !== S.lastTick) { S.lastTick = secs; sfx("tick"); }
-  if (S.timeLeft <= 0) { S.timeLeft = 0; endRound(); return; }
-
-  // Waves
-  if (S.elapsed >= S.nextWaveAt && S.timeLeft > 1.2) {
-    const wave = makeWave();
-    S.nextWaveAt = S.elapsed + wave.gap;
-    for (const lane of S.lanes) for (const it of wave.items) lane.pending.push({ at: S.elapsed + it.delay, it });
-  }
-
-  const g = gravity();
+function updateLanes(dt) {
   for (const lane of S.lanes) {
-    lane.flash = Math.max(0, (lane.flash || 0) - dt);
-    for (const pd of lane.pending.filter((q) => q.at <= S.elapsed)) launch(lane, pd.it);
-    lane.pending = lane.pending.filter((q) => q.at > S.elapsed);
-    for (const f of lane.fruits) { f.u += f.vu * dt; f.vy += g * dt; f.y += f.vy * dt; f.rot += f.spin * dt; f.age += dt; }
-    lane.fruits = lane.fruits.filter((f) => !(f.vy > 0 && f.y > view.H + fruitR(lane, f.type) * 2));
+    const p = playerOf(lane);
+    const ldt = dt * (hasPower(p, "freeze") ? 0.35 : 1); // freeze = slow motion in your own lane
+    lane.flash = Math.max(0, lane.flash - dt);
+    // Fruit frenzy: a shower of extra fruit in this player's lane only
+    if (p.frenzyT > 0) {
+      p.frenzyT -= dt; p.frenzyNext -= dt;
+      if (p.frenzyNext <= 0) {
+        p.frenzyNext = 0.12;
+        launch(lane, { type: FRUITS[Math.floor(Math.random() * FRUITS.length)], u: rand(0.15, 0.85), uEnd: rand(0.3, 0.7), apex: rand(0.15, 0.4), spin: rand(-3, 3) });
+      }
+    }
+    for (const pd of lane.pending.filter((q) => q.at <= S.playT)) launch(lane, pd.it);
+    lane.pending = lane.pending.filter((q) => q.at > S.playT);
+    for (const f of lane.fruits) { f.u += f.vu * ldt; f.vy += f.g * ldt; f.y += f.vy * ldt; f.rot += f.spin * ldt; }
+    lane.fruits = lane.fruits.filter((f) => {
+      if (!(f.vy > 0 && f.y > view.H + fruitR(lane, f.type) * 2)) return true;
+      if (!f.type.bomb && !f.type.power) p.streak = 0; // a missed fruit breaks the streak
+      return false;
+    });
+    updateBoss(lane, ldt);
   }
 }
 
@@ -426,11 +640,12 @@ function updateEffects(dt) {
   S.popups = S.popups.filter((p) => p.life > 0);
 }
 
-function endRound() {
+function endGame() {
   S.over = true;
   S.players.forEach((p, i) => p.blades.forEach((b) => endCombo(i, b)));
   sfx("win");
-  const stats = (p) => `${p.sliced} fruit · best combo ${p.bestCombo || "–"} · bombs ${p.bombs}`;
+  const total = STAGES.length - S.firstStage;
+  const stats = (p) => `bosses ${p.bosses}/${total} · ${p.sliced} fruit · best combo ${p.bestCombo || "–"} · bombs ${p.bombs}`;
   if (S.players.length === 2) {
     const [a, b] = S.players;
     const w = a.score === b.score ? -1 : a.score > b.score ? 0 : 1;
@@ -441,18 +656,19 @@ function endRound() {
   } else {
     const p = S.players[0], best = Math.max(loadNum(BEST_KEY, 0), p.score);
     saveStr(BEST_KEY, best);
-    $("end-title").textContent = "Time's up!";
+    $("end-title").textContent = p.bosses === total ? "All bosses defeated! 🎉" : "Journey complete!";
     $("end-title").className = "";
     $("end-text").innerHTML = `Score <b>${p.score}</b> · Best <b>${best}</b><br><small>${stats(p)}</small>`;
   }
-  setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, 700);
+  setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, 900);
 }
 
 // ---------- Render ----------
 function render() {
   const { W, H } = view;
+  const st = STAGES[S.stage] || STAGES[0];
   const bg = ctx.createLinearGradient(0, 0, 0, H);
-  bg.addColorStop(0, "#2a1a10"); bg.addColorStop(1, "#140b06");
+  bg.addColorStop(0, st.bg[0]); bg.addColorStop(1, st.bg[1]);
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
   // wooden planks
@@ -469,9 +685,14 @@ function render() {
   ctx.globalAlpha = 1;
 
   for (const lane of S.lanes) {
-    const rect = laneRect(lane);
+    const rect = laneRect(lane), p = playerOf(lane);
+    if (hasPower(p, "freeze")) { ctx.fillStyle = "rgba(116,192,252,0.12)"; ctx.fillRect(rect.x, 0, rect.w, H); }
     if (lane.flash > 0) { ctx.fillStyle = `rgba(255,120,60,${lane.flash * 0.6})`; ctx.fillRect(rect.x, 0, rect.w, H); }
-    for (const f of lane.fruits) drawFruit(f.type, rect.x + f.u * rect.w, f.y, fruitR(lane, f.type), f.rot);
+    drawBoss(lane);
+    for (const f of lane.fruits) {
+      const x = rect.x + f.u * rect.w, r = fruitR(lane, f.type);
+      if (f.type.power) drawPower(f.type, x, f.y, r, f.rot); else drawFruit(f.type, x, f.y, r, f.rot);
+    }
   }
   for (const h of S.halves) { ctx.globalAlpha = clamp(h.life / 0.4, 0, 1); drawHalf(h.type, h.x, h.y, h.r, h.rot); }
   ctx.globalAlpha = 1;
@@ -490,63 +711,107 @@ function render() {
 
   S.players.forEach((p, i) => drawBlades(p, i));
 
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
   for (const p of S.popups) {
-    ctx.globalAlpha = clamp(p.life / p.max * 2, 0, 1);
+    ctx.globalAlpha = clamp((p.life / p.max) * 2, 0, 1);
     ctx.fillStyle = p.color;
     ctx.font = `800 ${W < 600 ? 16 : 22}px system-ui, sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(p.text, p.x, p.y);
   }
   ctx.globalAlpha = 1;
 
-  // scores per lane + clock
+  drawLaneHud();
+  drawClock();
+
+  if (S.waiting) drawBanner(ctx, W, H, S.waiting);
+  else if (S.over) return;
+  else if (S.phase === "ready") drawBanner(ctx, W, H, `Get ready… ${Math.ceil(S.readyTimer)}`, "#ffffff");
+  else if (S.phase === "intro") drawBanner(ctx, W, H, `Stage ${S.stage + 1} / ${STAGES.length} — ${st.name}`, "#ffffff");
+  else if (S.phase === "bossIntro") drawBanner(ctx, W, H, `⚠ BOSS: ${BOSSES[S.stage].name}!`, "#ff6b6b");
+  else if (S.phase === "clear") {
+    const all = S.lanes.every((l) => l.boss?.dead);
+    drawBanner(ctx, W, H, S.stage + 1 < STAGES.length ? (all ? `Stage ${S.stage + 1} clear!` : `Stage ${S.stage + 1} over`) : "Final stage complete!", "#69db7c");
+  }
+}
+
+// Score, streak and active powers at the top of each lane.
+function drawLaneHud() {
+  const H = view.H;
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   S.lanes.forEach((lane) => {
-    const rect = laneRect(lane), p = S.players[lane.player];
-    const cx = rect.x + rect.w / 2;
+    const rect = laneRect(lane), p = playerOf(lane), cx = rect.x + rect.w / 2;
     ctx.font = `600 13px system-ui, sans-serif`;
     ctx.fillStyle = "rgba(255,255,255,0.55)";
     ctx.fillText(playerName(lane.player), cx, 40);
-    ctx.font = `800 ${Math.round(Math.min(rect.w, H) * 0.09)}px system-ui, sans-serif`;
+    const size = Math.round(Math.min(rect.w, H) * 0.08);
+    ctx.font = `800 ${size}px system-ui, sans-serif`;
     ctx.fillStyle = S.lanes.length === 2 ? COLORS[lane.player] : "#ffffff";
-    ctx.fillText(p.score, cx, 58);
+    ctx.fillText(p.score, cx, 56);
+    let y = 60 + size;
+    const m = streakMult(p);
+    if (m > 1 || p.streak > 0) {
+      ctx.font = `700 14px system-ui, sans-serif`;
+      ctx.fillStyle = m > 1 ? "#69db7c" : "rgba(255,255,255,0.4)";
+      ctx.fillText(`streak ${p.streak}${m > 1 ? ` · ×${m}` : ""}`, cx, y);
+      y += 20;
+    }
+    // active powers with a shrinking bar
+    const active = POWER_NAMES.filter((k) => hasPower(p, k));
+    active.forEach((k, j) => {
+      const pw = POWERS[k], bx = cx + (j - (active.length - 1) / 2) * 64;
+      ctx.font = `700 18px system-ui, sans-serif`; ctx.fillStyle = pw.color;
+      ctx.fillText(pw.icon, bx, y);
+      ctx.fillStyle = "rgba(255,255,255,0.15)"; ctx.fillRect(bx - 24, y + 24, 48, 5);
+      ctx.fillStyle = pw.color; ctx.fillRect(bx - 24, y + 24, 48 * (p.powers[k] / pw.time), 5);
+    });
     if (p.stun > 0) { ctx.font = `700 15px system-ui, sans-serif`; ctx.fillStyle = "#ff6b3d"; ctx.fillText("blade jammed!", cx, H - 40); }
-    else if (S.mode !== "mouse" && p.lostFor > CFG.lostGrace && S.phase === "play") {
-      ctx.font = `700 16px system-ui, sans-serif`; ctx.fillStyle = "#ffd25e"; ctx.fillText("show your hand ✋", cx, H * 0.45);
+    else if (S.mode !== "mouse" && p.lostFor > CFG.lostGrace && S.phase !== "ready") {
+      ctx.font = `700 16px system-ui, sans-serif`; ctx.fillStyle = "#ffd25e"; ctx.fillText("show your hand ✋", cx, H * 0.75);
     }
   });
-  if (S.phase === "play") {
-    const t = Math.ceil(S.timeLeft);
-    ctx.font = `800 ${W < 600 ? 22 : 30}px system-ui, sans-serif`;
-    const tx = S.lanes.length === 2 ? W / 2 : W - 60;
-    ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(tx - 38, 50, 76, 40);
-    ctx.fillStyle = t <= 5 ? "#ff6b3d" : "#ffd25e";
-    ctx.fillText(`${t}`, tx, 55);
-  }
+}
 
-  if (S.waiting) drawBanner(ctx, W, H, S.waiting);
-  else if (S.phase === "ready" && !S.over) drawBanner(ctx, W, H, `Get ready… ${Math.ceil(S.readyTimer)}`, "#ffffff");
+// Stage number + time left in the current phase.
+function drawClock() {
+  if (!["fruit", "boss", "intro", "bossIntro", "clear"].includes(S.phase)) return;
+  const { W } = view;
+  const tx = S.lanes.length === 2 ? W / 2 : W - 70;
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(tx - 48, 38, 96, 58);
+  ctx.font = `600 12px system-ui, sans-serif`; ctx.fillStyle = "rgba(255,255,255,0.7)";
+  ctx.fillText(`STAGE ${S.stage + 1}/${STAGES.length}`, tx, 42);
+  if (S.phase === "fruit" || S.phase === "boss") {
+    const t = Math.max(0, Math.ceil((S.phase === "fruit" ? CFG.stageTime : CFG.bossTime) - S.phaseT));
+    ctx.font = `800 ${W < 600 ? 20 : 26}px system-ui, sans-serif`;
+    ctx.fillStyle = S.phase === "boss" ? (t <= 5 ? "#ff6b3d" : "#ff8787") : t <= 5 ? "#ff6b3d" : "#ffd25e";
+    ctx.fillText(S.phase === "boss" ? `☠ ${t}` : `${t}`, tx, 60);
+  }
 }
 
 function drawBlades(p, i) {
-  const col = p.stun > 0 ? "#777777" : S.players.length === 2 ? COLORS[i] : "#bff4ff";
+  const mega = hasPower(p, "mega");
+  const col = p.stun > 0 ? "#777777" : mega ? "#ffd43b" : S.players.length === 2 ? COLORS[i] : "#bff4ff";
+  const width = bladeR(p) * 0.9;
   for (const b of p.blades) {
     const tr = b.trail, n = tr.length;
     if (n > 1) {
       ctx.lineCap = "round"; ctx.lineJoin = "round";
-      ctx.shadowColor = col; ctx.shadowBlur = 18;
+      ctx.shadowColor = col; ctx.shadowBlur = mega ? 30 : 18;
       for (let k = 1; k < n; k++) {
         const age = (S.clock - tr[k].t) / CFG.bladeLife;
         ctx.strokeStyle = col;
-        ctx.globalAlpha = clamp(1 - age, 0.1, 1);
-        ctx.lineWidth = 2 + 10 * (k / n);
+        ctx.globalAlpha = clamp(1 - age, 0.1, 0.9);
+        ctx.lineWidth = 3 + width * (k / n);
         ctx.beginPath(); ctx.moveTo(tr[k - 1].x, tr[k - 1].y); ctx.lineTo(tr[k].x, tr[k].y); ctx.stroke();
       }
       ctx.shadowBlur = 0; ctx.globalAlpha = 1;
     }
-    // fingertip marker so players always see where their blade is
+    // fingertip marker shows the blade's reach so players always see where it is
     const tip = tr[n - 1];
-    ctx.fillStyle = col; ctx.globalAlpha = b.missing > 0 ? 0.3 : 0.9;
+    ctx.globalAlpha = b.missing > 0 ? 0.25 : 0.35;
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(tip.x, tip.y, bladeR(p), 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = b.missing > 0 ? 0.3 : 0.95;
     ctx.beginPath(); ctx.arc(tip.x, tip.y, 7, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2; ctx.stroke();
     ctx.globalAlpha = 1;
@@ -574,24 +839,48 @@ function drawFruit(t, x, y, r, rot) {
     return;
   }
   if (t.golden) { ctx.shadowColor = "#ffd25e"; ctx.shadowBlur = 30; }
+  fruitBody(t, r);
+  ctx.shadowBlur = 0;
+  // stem + leaf
+  ctx.strokeStyle = "#5c3d1e"; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(0, -r * 0.85); ctx.lineTo(r * 0.05, -r * 1.15); ctx.stroke();
+  ctx.fillStyle = t.golden ? "#ffe680" : "#51cf66";
+  ctx.beginPath(); ctx.ellipse(r * 0.28, -r * 1.05, r * 0.26, r * 0.11, -0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// Round body with shading, optional stripes, and a shine (shared by fruit and bosses).
+function fruitBody(t, r) {
   const g = ctx.createRadialGradient(-r * 0.35, -r * 0.35, r * 0.1, 0, 0, r);
   g.addColorStop(0, t.light); g.addColorStop(1, t.rind);
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
-  ctx.shadowBlur = 0;
   if (t.stripes) {
     ctx.save(); ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.clip();
     ctx.strokeStyle = t.stripes; ctx.lineWidth = r * 0.12;
     for (let k = -2; k <= 2; k++) { ctx.beginPath(); ctx.ellipse(k * r * 0.45, 0, r * 0.14, r * 1.1, 0, 0, Math.PI * 2); ctx.stroke(); }
     ctx.restore();
   }
-  // stem + leaf
-  ctx.strokeStyle = "#5c3d1e"; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(0, -r * 0.85); ctx.lineTo(r * 0.05, -r * 1.15); ctx.stroke();
-  ctx.fillStyle = t.golden ? "#ffe680" : "#51cf66";
-  ctx.beginPath(); ctx.ellipse(r * 0.28, -r * 1.05, r * 0.26, r * 0.11, -0.5, 0, Math.PI * 2); ctx.fill();
-  // shine
   ctx.fillStyle = "rgba(255,255,255,0.35)";
   ctx.beginPath(); ctx.ellipse(-r * 0.38, -r * 0.4, r * 0.2, r * 0.12, -0.7, 0, Math.PI * 2); ctx.fill();
+}
+
+// Power-up orb: glowing bubble with a spinning ring and the power's icon.
+function drawPower(t, x, y, r, rot) {
+  ctx.save();
+  ctx.translate(x, y);
+  const pulse = 0.5 + 0.5 * Math.sin(S.clock * 8);
+  ctx.shadowColor = t.color; ctx.shadowBlur = 25 + pulse * 20;
+  const g = ctx.createRadialGradient(0, 0, r * 0.1, 0, 0, r);
+  g.addColorStop(0, "#ffffff"); g.addColorStop(0.5, t.color + "cc"); g.addColorStop(1, t.color + "55");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.rotate(rot);
+  ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 3; ctx.setLineDash([r * 0.4, r * 0.25]);
+  ctx.beginPath(); ctx.arc(0, 0, r * 1.12, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+  ctx.rotate(-rot);
+  ctx.fillStyle = "#10142a"; ctx.font = `900 ${Math.round(r * 0.9)}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(t.icon, 0, r * 0.05);
   ctx.restore();
 }
 
@@ -603,11 +892,108 @@ function drawHalf(t, x, y, r, rot) {
   ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI); ctx.closePath(); ctx.fill();
   ctx.fillStyle = t.flesh;
   ctx.beginPath(); ctx.arc(0, 0, r * 0.82, 0, Math.PI); ctx.closePath(); ctx.fill();
-  if (t.name === "watermelon" || t.name === "kiwi") {
+  if (t.name === "watermelon" || t.name === "kiwi" || t.name === "King Melon" || t.name === "Dragonfruit Overlord") {
     ctx.fillStyle = "#222";
-    for (let k = -2; k <= 2; k++) { ctx.beginPath(); ctx.ellipse(k * r * 0.25, r * 0.38, 2.5, 4, 0, 0, Math.PI * 2); ctx.fill(); }
+    for (let k = -2; k <= 2; k++) { ctx.beginPath(); ctx.ellipse(k * r * 0.25, r * 0.38, r * 0.04 + 1.5, r * 0.07 + 2, 0, 0, Math.PI * 2); ctx.fill(); }
   }
   ctx.restore();
+}
+
+// A boss: giant angry fruit with its own decoration, an HP bar, and a shield bubble when guarding.
+function drawBoss(lane) {
+  const b = lane.boss;
+  if (!b || b.dead || b.alpha <= 0) return;
+  const rect = laneRect(lane), R = bossR(lane), d = b.def;
+  const x = rect.x + b.u * rect.w, y = b.v * view.H;
+  ctx.save();
+  ctx.globalAlpha = b.alpha;
+  ctx.translate(x + (b.hitT > 0 ? rand(-5, 5) : 0), y + (b.hitT > 0 ? rand(-5, 5) : 0));
+  ctx.rotate(Math.sin(b.t * 2.5) * 0.06);
+  ctx.shadowColor = d.juice; ctx.shadowBlur = 30;
+  if (d.deco === "spikes") {
+    ctx.fillStyle = d.rind;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a - 0.15) * R * 0.92, Math.sin(a - 0.15) * R * 0.92);
+      ctx.lineTo(Math.cos(a) * R * 1.22, Math.sin(a) * R * 1.22);
+      ctx.lineTo(Math.cos(a + 0.15) * R * 0.92, Math.sin(a + 0.15) * R * 0.92);
+      ctx.fill();
+    }
+  }
+  if (d.leaves) {
+    ctx.fillStyle = "#2f9e44";
+    for (let k = -2; k <= 2; k++) {
+      ctx.beginPath(); ctx.moveTo(k * R * 0.18 - R * 0.1, -R * 0.85); ctx.lineTo(k * R * 0.3, -R * (1.55 - Math.abs(k) * 0.15)); ctx.lineTo(k * R * 0.18 + R * 0.1, -R * 0.85); ctx.fill();
+    }
+  }
+  fruitBody(d, R);
+  ctx.shadowBlur = 0;
+  ctx.save(); ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.clip();
+  if (d.deco === "crosshatch") {
+    ctx.strokeStyle = "rgba(120,70,0,0.55)"; ctx.lineWidth = 3;
+    for (let k = -4; k <= 4; k++) {
+      ctx.beginPath(); ctx.moveTo(k * R * 0.35 - R, -R); ctx.lineTo(k * R * 0.35 + R, R); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(k * R * 0.35 + R, -R); ctx.lineTo(k * R * 0.35 - R, R); ctx.stroke();
+    }
+  } else if (d.deco === "hair") {
+    ctx.strokeStyle = "rgba(40,25,10,0.6)"; ctx.lineWidth = 2;
+    for (let k = 0; k < 40; k++) {
+      const a = k * 2.4, rr = R * (0.3 + ((k * 37) % 70) / 100);
+      ctx.beginPath(); ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); ctx.lineTo(Math.cos(a + 0.2) * rr * 1.1, Math.sin(a + 0.2) * rr * 1.1); ctx.stroke();
+    }
+  } else if (d.deco === "scales") {
+    ctx.fillStyle = "#51cf66";
+    for (let k = 0; k < 12; k++) {
+      const a = k * 0.52 + 0.3, rr = R * (0.45 + (k % 3) * 0.17);
+      ctx.save(); ctx.translate(Math.cos(a) * rr, Math.sin(a) * rr); ctx.rotate(a);
+      ctx.beginPath(); ctx.moveTo(0, -R * 0.08); ctx.lineTo(R * 0.22, 0); ctx.lineTo(0, R * 0.08); ctx.fill();
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+  // angry face (X eyes when hit)
+  const eye = R * 0.16;
+  for (const s of [-1, 1]) {
+    const ex = s * R * 0.32, ey = -R * 0.08;
+    if (b.hitT > 0) {
+      ctx.strokeStyle = "#111"; ctx.lineWidth = R * 0.05;
+      ctx.beginPath(); ctx.moveTo(ex - eye * 0.7, ey - eye * 0.7); ctx.lineTo(ex + eye * 0.7, ey + eye * 0.7);
+      ctx.moveTo(ex + eye * 0.7, ey - eye * 0.7); ctx.lineTo(ex - eye * 0.7, ey + eye * 0.7); ctx.stroke();
+    } else {
+      ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(ex, ey, eye, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(ex + Math.sin(b.t * 1.7) * eye * 0.35, ey + eye * 0.2, eye * 0.45, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.strokeStyle = "#111"; ctx.lineWidth = R * 0.06; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(ex - s * eye * 1.1, ey - eye * 1.6); ctx.lineTo(ex + s * eye * 0.9, ey - eye * 1.0); ctx.stroke();
+  }
+  ctx.strokeStyle = "#111"; ctx.lineWidth = R * 0.05;
+  ctx.beginPath(); ctx.moveTo(-R * 0.3, R * 0.42);
+  for (let k = 1; k <= 6; k++) ctx.lineTo(-R * 0.3 + k * R * 0.1, R * (k % 2 ? 0.34 : 0.42));
+  ctx.stroke();
+  if (d.crown) {
+    ctx.fillStyle = "#ffd25e"; ctx.strokeStyle = "#b8860b"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(-R * 0.4, -R * 0.82);
+    ctx.lineTo(-R * 0.45, -R * 1.25); ctx.lineTo(-R * 0.2, -R * 1.02); ctx.lineTo(0, -R * 1.35);
+    ctx.lineTo(R * 0.2, -R * 1.02); ctx.lineTo(R * 0.45, -R * 1.25); ctx.lineTo(R * 0.4, -R * 0.82); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  if (b.hitT > 0) { ctx.fillStyle = "rgba(255,255,255,0.35)"; ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill(); }
+  if (bossShielded(b)) {
+    ctx.strokeStyle = "rgba(200,230,255,0.9)"; ctx.lineWidth = 6; ctx.shadowColor = "#a5d8ff"; ctx.shadowBlur = 25;
+    ctx.fillStyle = "rgba(165,216,255,0.18)";
+    ctx.beginPath(); ctx.arc(0, 0, R * 1.25, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+  ctx.restore();
+  // name + HP bar
+  const bw = Math.min(R * 2.2, rect.w * 0.8), by = y - R * 1.45 - 18;
+  ctx.globalAlpha = b.alpha;
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(x - bw / 2 - 2, by - 2, bw + 4, 14);
+  ctx.fillStyle = "#ff4d5e"; ctx.fillRect(x - bw / 2, by, bw * (b.hp / d.hp), 10);
+  ctx.font = `700 13px system-ui, sans-serif`; ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  ctx.fillText(`${d.name}${bossShielded(b) ? " 🛡" : ""}`, x, by - 3);
+  ctx.globalAlpha = 1;
 }
 
 // ---------- Main loop ----------

@@ -122,3 +122,34 @@ Status (2026-10-24)
 - [ ] Real webcam play with two people — needs the user (no camera in the test browser).
 - [x] PR https://github.com/blurboy1985/face-arcade/pull/1 merged; deployed to https://face-arcade.danielquek.com
   (wrangler version bb595b4b; 11 site files) — /ninja and /hockey load live with no console errors.
+
+## Hand Ninja: stages, bosses, powers (2026-10-24)
+Request: multiple stages with rising difficulty, special powers, bosses; bigger fruit; bigger slicing area;
+slice many fruits at once. Ship via PR → self-review → merge → deploy (user pre-authorized).
+
+- **5 stages** (Orchard → Market → Jungle → Volcano → Dragon's Peak): each = intro → fruit phase (30 s, setting)
+  → boss → stage clear. Per stage: faster fruit (gravity × speed²), shorter wave gaps, more fruit per wave,
+  more bombs; difficulty also ramps within a stage. Own background colours per stage.
+- **Bosses** (one per stage, HP rises 8 → 26, 30 s to beat or it escapes): King Melon (drifts), Pineapple Brute
+  (bounces), Coconut Golem (periodic shield blocks hits), Durian Dragon (throws bombs), Dragonfruit Overlord
+  (teleports, bombs, fruit minions). Each blade hits a boss at most every 0.22 s. Defeat bonus = 20 × stage +
+  seconds left. Duel: each lane gets its own boss copy driven by an identically-seeded RNG → fair.
+- **Powers** (glowing orbs in the fruit waves, same in both lanes; slice to activate for yourself):
+  ❄ Freeze (your lane slow-mo 5 s) · ⚡ Mega blade (2.5× hit area, low speed needed, 2× boss damage, 6 s)
+  · ×2 Double points (8 s) · 🍉 Fruit frenzy (burst of bonus fruit).
+- **Streak multiplier**: every 8 fruit in a row adds ×1 (max ×4); a missed fruit or bomb resets it.
+- **Bigger**: fruit radius ~0.085 × min(lane, height) (was 0.055); blade has a hit radius (~3.5% of screen)
+  added to every fruit, so one swipe through a cluster slices all of it; thicker trail.
+- Settings: stage length, start stage (1–5, for practice).
+
+Verify (debug hook `handNinja.goto(stage, phase)` + injected hands): stage progression & end screen,
+difficulty numbers rise per stage, each boss's behaviour (shield blocks, bombs thrown, teleport, minions),
+boss HP/defeat bonus/escape, every power, multi-fruit swipe, streak reset on miss, both lanes identical.
+- [x] Verified (injected hands / pointer events, 1280×720 and narrow portrait):
+  full 5-stage run → end screen; per-stage fruit 24→65, launch speed 1806→2386 px/s, more bombs; both lanes
+  identical incl. boss moves; sizes at 1280×720 2P: fruit r 61 (was ~38), boss r 109, blade reach 25 (mega 63);
+  one swipe sliced a 5-fruit cluster (+5 combo), fruit just outside reach untouched; streak hits 8, miss → 0;
+  double = +2/fruit, mega slices a slow sweep at 2× reach, freeze slows own lane only, frenzy fills own lane only;
+  King Melon down in 8 hits (+57 incl. time bonus), unbeaten boss escapes at 30 s → next stage; ≤5 boss hits/s;
+  Coconut shield blocks then un-blocks; Durian throws bombs; Dragonfruit teleports; mouse run from stage 4 beats
+  both bosses; no console errors.
