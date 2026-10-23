@@ -120,3 +120,5 @@ Status (2026-10-24)
   blade-continuity limit too tight for fast swipes; CPU only nudged the puck (stalled kick-off) and could push a
   puck behind it into its own goal.
 - [ ] Real webcam play with two people — needs the user (no camera in the test browser).
+- [x] PR https://github.com/blurboy1985/face-arcade/pull/1 merged; deployed to https://face-arcade.danielquek.com
+  (wrangler version bb595b4b; 11 site files) — /ninja and /hockey load live with no console errors.
