@@ -16,7 +16,8 @@
   </div>
   <div class="right">
     <div id="lives" class="hearts"></div>
-    <div class="small">Shield <span id="shield-status">ready</span></div>
+    <div class="small">Sector <span id="sector">1</span> · Shield <span id="shield-status">ready</span></div>
+    <div class="small" id="power-status"></div>
   </div>
 </div>
 
@@ -33,7 +34,8 @@
 <div id="menu" class="screen">
   <div class="card">
     <h1>Face Pilot</h1>
-    <p>Steer your ship by moving your head.<br>Open your mouth to fire lasers.<br>Pucker your lips to blow a <b>shield bubble</b>.<br>Dodge asteroids, grab the gold stars.</p>
+    <p>Steer your ship by moving your head.<br>Open your mouth to fire lasers.<br>Pucker your lips to blow a <b>shield bubble</b>.<br>
+      Fly through <b>5 sectors</b> that get more dangerous — each ends with a <b>boss</b>. Grab capsules for power-ups!</p>
     <div class="btns">
       <button id="btn-face">Play with Face (webcam)</button>
       <button id="btn-keys" class="secondary">Play with Keyboard</button>
@@ -50,8 +52,12 @@
         <input id="jaw" type="range" min="0.1" max="0.7" step="0.05" value="0.35"></label>
       <label>Pucker trigger level <span id="pucker-val">0.35</span>
         <input id="pucker" type="range" min="0.15" max="0.7" step="0.05" value="0.35"></label>
+      <label>Start at sector <span id="start-val">1 · Asteroid Belt</span>
+        <input id="start-sector" type="range" min="1" max="5" step="1" value="1"></label>
     </div>
     <div class="help">
+      Capsules: <b style="color:#69db7c">≋ spread shot</b> · <b style="color:#ffd43b">» rapid fire</b> · <b style="color:#ff8787">⚡ mega laser</b> ·
+      <b style="color:#ff5ea8">♥ extra life</b> · <b>✹ smart bomb</b> (clears the screen, hurts bosses). Your shield also blocks enemy shots.<br>
       Face: sit centered, relaxed, and hold still for a second to calibrate.<br>
       Keyboard: <kbd>←↑↓→</kbd>/<kbd>WASD</kbd> move · <kbd>Space</kbd> fire · <kbd>X</kbd> shield<br>
       Video stays on your computer; nothing is uploaded.
@@ -62,8 +68,8 @@
 
 <div id="gameover" class="screen hidden">
   <div class="card">
-    <h2>Game Over</h2>
-    <p>Score <b id="final-score">0</b> · Best <b id="final-best">0</b></p>
+    <h2 id="end-title">Game Over</h2>
+    <p><span id="end-text"></span><br>Score <b id="final-score">0</b> · Best <b id="final-best">0</b></p>
     <div class="btns">
       <button id="btn-again">Play again</button>
       <button id="btn-menu" class="secondary">Menu</button>
@@ -85,16 +91,45 @@ const CFG = {
   rangeY: 0.08,       // nose travel (fraction of video height) for full up/down
   jawThreshold: 0.35, // jawOpen blendshape score that fires
   fireCooldown: 0.16,
-  lives: 3,
+  lives: 3, maxLives: 5,
   puckerThreshold: 0.35, // lip pucker above resting level that raises the shield
   shieldTime: 2.5,
   shieldCooldown: 8,     // counted from when the shield goes up
   shieldR: 34,
+  laserR: 7,             // extra hit reach of a laser (mega laser: 16)
+  startSector: 1,
 };
+
+// Each sector runs for `time` seconds of waves, then its boss. Later sectors are faster and add enemies.
+const SECTORS = [
+  { name: "Asteroid Belt", time: 40, astRate: 1.0, astSpeed: 1.0, fighterGap: 0, mineGap: 0, bg: "#05060f", neb: "94,224,255" },
+  { name: "Nebula", time: 40, astRate: 1.25, astSpeed: 1.1, fighterGap: 7, mineGap: 0, bg: "#0b0618", neb: "197,139,255" },
+  { name: "Pirate Lanes", time: 40, astRate: 1.4, astSpeed: 1.2, fighterGap: 4.5, mineGap: 0, bg: "#120707", neb: "255,120,90" },
+  { name: "Hive", time: 40, astRate: 1.55, astSpeed: 1.3, fighterGap: 3.5, mineGap: 6, bg: "#04110a", neb: "105,219,124" },
+  { name: "Void", time: 40, astRate: 1.7, astSpeed: 1.4, fighterGap: 3, mineGap: 4.5, bg: "#020204", neb: "255,94,168" },
+];
+// Bosses cycle through their attack list every `rate` seconds (faster below half health).
+const BOSSES = [
+  { name: "Rock Titan", hp: 80, kind: "rock", color: "#c9a27a", attacks: ["rocks", "aimed"], rate: 1.7, speed: 0.35 },
+  { name: "Saucer Queen", hp: 110, kind: "saucer", color: "#c58bff", attacks: ["aimed3", "aimed", "ring"], rate: 1.35, speed: 0.55 },
+  { name: "Pirate Cruiser", hp: 140, kind: "cruiser", color: "#ff8a5e", attacks: ["spread", "aimed3", "rocks"], rate: 1.25, speed: 0.4 },
+  { name: "Hive Mother", hp: 170, kind: "hive", color: "#69db7c", attacks: ["spawn", "spread", "aimed3"], rate: 1.3, speed: 0.45 },
+  { name: "Void Dreadnought", hp: 220, kind: "dread", color: "#ff5ea8", attacks: ["ring", "spread", "aimed3", "rocks", "spawn"], rate: 1.05, speed: 0.6 },
+];
+const POWERS = {
+  spread: { label: "Spread shot", icon: "≋", color: "#69db7c", time: 10, weight: 3 },
+  rapid: { label: "Rapid fire", icon: "»", color: "#ffd43b", time: 8, weight: 3 },
+  mega: { label: "Mega laser", icon: "⚡", color: "#ff8787", time: 8, weight: 2 },
+  life: { label: "Extra life", icon: "♥", color: "#ff5ea8", weight: 1 },
+  bomb: { label: "Smart bomb", icon: "✹", color: "#ffffff", weight: 1.5 },
+};
+const TIMED = ["spread", "rapid", "mega"];
+
 let sensitivity = 1;
 $("sens").addEventListener("input", (e) => { sensitivity = +e.target.value; $("sens-val").textContent = sensitivity.toFixed(1) + "×"; });
 $("jaw").addEventListener("input", (e) => { CFG.jawThreshold = +e.target.value; $("jaw-val").textContent = CFG.jawThreshold.toFixed(2); });
 $("pucker").addEventListener("input", (e) => { CFG.puckerThreshold = +e.target.value; $("pucker-val").textContent = CFG.puckerThreshold.toFixed(2); });
+$("start-sector").addEventListener("input", (e) => { CFG.startSector = +e.target.value; $("start-val").textContent = `${CFG.startSector} · ${SECTORS[CFG.startSector - 1].name}`; });
 
 // ---------- Input ----------
 const keys = trackKeys((code) => {
@@ -164,23 +199,31 @@ function drawCamOverlay(faces) {
 }
 
 // ---------- Game state ----------
+// Phases: intro → play (waves) → warning → boss → clear → next sector's intro … → victory.
 const S = {
   mode: null, running: false, paused: false, over: false,
-  t: 0, score: 0, best: loadNum("facePilotBest"), lives: CFG.lives, invuln: 0, fireCd: 0, shake: 0,
-  spawnAst: 1, spawnStar: 3, waiting: "", shield: 0, shieldCd: 0, prevPucker: false,
+  t: 0, score: 0, best: loadNum("facePilotBest"), lives: CFG.lives, invuln: 0, fireCd: 0, shake: 0, flash: 0,
+  spawnAst: 1, spawnStar: 3, spawnFighter: 0, spawnMine: 0, spawnPower: 8, waiting: "", shield: 0, shieldCd: 0, prevPucker: false,
+  sector: 0, phase: "intro", phaseT: 0, boss: null, powers: {}, banner: "",
   ship: { x: 0, y: 0, tilt: 0 },
-  asteroids: [], stars: [], lasers: [], particles: [],
+  asteroids: [], stars: [], lasers: [], particles: [], fighters: [], mines: [], bullets: [], capsules: [], texts: [],
 };
 const bg = Array.from({ length: 160 }, () => ({ x: Math.random(), y: Math.random(), z: rand(0.2, 1) }));
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
-window.facePilot = { S, music, face, calib, tracker, step: (dt = 1 / 60) => update(dt) };
+window.facePilot = {
+  S, music, face, calib, tracker, keys, CFG, SECTORS, BOSSES, POWERS,
+  start: (mode = "keys") => startGame(mode), goto: (sector, phase = "intro") => { S.sector = sector - 1; setPhase(phase); },
+  give: (kind) => collect(kind, S.ship.x, S.ship.y), step: (dt = 1 / 60) => update(dt),
+};
 
 function startGame(mode) {
   Object.assign(S, {
     mode, running: true, paused: false, over: false, t: 0, score: 0, lives: CFG.lives,
-    invuln: 1.5, fireCd: 0, shake: 0, spawnAst: 1, spawnStar: 3, shield: 0, shieldCd: 0, prevPucker: false,
-    asteroids: [], stars: [], lasers: [], particles: [],
+    invuln: 1.5, fireCd: 0, shake: 0, flash: 0, spawnAst: 1, spawnStar: 3, spawnFighter: 3, spawnMine: 4, spawnPower: 8,
+    shield: 0, shieldCd: 0, prevPucker: false, sector: CFG.startSector - 1, boss: null, powers: {},
+    asteroids: [], stars: [], lasers: [], particles: [], fighters: [], mines: [], bullets: [], capsules: [], texts: [],
   });
+  setPhase("intro");
   S.ship.x = view.W / 2; S.ship.y = view.H * 0.72; S.ship.tilt = 0;
   keys.clear();
   music.restart();
@@ -193,13 +236,15 @@ function startGame(mode) {
   updateHud(true);
 }
 
-function gameOver() {
+function gameOver(won) {
   S.over = true;
   const final = Math.floor(S.score);
   if (final > S.best) { S.best = final; saveStr("facePilotBest", final); }
+  $("end-title").textContent = won ? "Galaxy saved! 🎉" : "Game Over";
+  $("end-text").textContent = won ? "All five bosses defeated." : `Reached sector ${S.sector + 1} · ${SECTORS[S.sector].name}`;
   $("final-score").textContent = final;
   $("final-best").textContent = S.best;
-  setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, 700);
+  setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, won ? 1200 : 700);
 }
 
 function showMenu() {
@@ -215,13 +260,16 @@ function showMenu() {
 let hudCache = "";
 function updateHud(force) {
   const shield = S.shield > 0 ? "ON" : S.shieldCd > 0 ? `${Math.ceil(S.shieldCd)}s` : "ready";
-  const key = `${Math.floor(S.score)}|${S.lives}|${S.best}|${shield}`;
+  const powers = TIMED.filter((k) => S.powers[k] > 0).map((k) => `<span style="color:${POWERS[k].color}">${POWERS[k].icon} ${POWERS[k].label} ${Math.ceil(S.powers[k])}s</span>`).join(" · ");
+  const key = `${Math.floor(S.score)}|${S.lives}|${S.best}|${shield}|${S.sector}|${powers}`;
   if (!force && key === hudCache) return;
   hudCache = key;
   $("score").textContent = Math.floor(S.score);
   $("best").textContent = S.best;
   $("lives").textContent = "♥".repeat(Math.max(0, S.lives));
   $("shield-status").textContent = shield;
+  $("sector").textContent = `${S.sector + 1}/${SECTORS.length}`;
+  $("power-status").innerHTML = powers;
 }
 
 function explode(x, y, color, n = 18, speed = 220) {
@@ -231,18 +279,147 @@ function explode(x, y, color, n = 18, speed = 220) {
   }
 }
 
+function floatText(x, y, text, color = "#ffffff") { S.texts.push({ x, y, text, color, life: 1.1 }); }
+
 function makeAsteroid(x, y, r, vx, vy) {
   const n = 9 + Math.floor(Math.random() * 4);
   const verts = Array.from({ length: n }, (_, i) => ({ a: (i / n) * Math.PI * 2, m: rand(0.75, 1.15) }));
   return { x, y, r, vx, vy, rot: rand(0, 6.28), vr: rand(-2, 2), hp: r > 30 ? 2 : 1, verts };
 }
 
+// ---------- Phases ----------
+function setPhase(phase) {
+  S.phase = phase; S.phaseT = 0;
+  const sec = SECTORS[S.sector];
+  if (phase === "intro") { S.banner = `Sector ${S.sector + 1} / ${SECTORS.length} — ${sec.name}`; sfx("star"); }
+  if (phase === "warning") { S.banner = `⚠ WARNING — ${BOSSES[S.sector].name} approaching`; sfx("power"); }
+  if (phase === "boss") S.boss = makeBoss(BOSSES[S.sector]);
+  if (phase === "clear") S.banner = `Sector ${S.sector + 1} clear!`;
+}
+
+function stepPhase(dt) {
+  S.phaseT += dt;
+  const sec = SECTORS[S.sector];
+  if (S.phase === "intro" && S.phaseT > 2.2) setPhase("play");
+  else if (S.phase === "play" && S.phaseT > sec.time) setPhase("warning");
+  else if (S.phase === "warning" && S.phaseT > 2.5) setPhase("boss");
+  else if (S.phase === "clear" && S.phaseT > 3) {
+    if (S.sector + 1 < SECTORS.length) { S.sector++; setPhase("intro"); } else gameOver(true);
+  }
+}
+
+// ---------- Bosses ----------
+function bossSize() { const w = clamp(view.W * 0.3, 180, 380); return { w, h: w * 0.45 }; }
+
+function makeBoss(def) {
+  return { def, hp: def.hp, x: view.W / 2, y: -120, t: 0, attackT: 1.5, attackIdx: 0, hitT: 0, entering: true };
+}
+
+function updateBoss(dt) {
+  const b = S.boss;
+  if (!b) return;
+  const { W, H } = view, { w } = bossSize(), d = b.def;
+  b.t += dt; b.hitT = Math.max(0, b.hitT - dt);
+  const homeY = H * 0.15;
+  if (b.entering) { b.y += (homeY - b.y) * (1 - Math.exp(-dt * 2)); if (Math.abs(b.y - homeY) < 4) b.entering = false; return; }
+  b.x = W / 2 + Math.sin(b.t * d.speed) * (W / 2 - w * 0.55);
+  b.y = homeY + Math.sin(b.t * d.speed * 1.7) * H * 0.03;
+  b.attackT -= dt;
+  if (b.attackT <= 0) {
+    b.attackT = d.rate * (b.hp < d.hp / 2 ? 0.75 : 1); // enraged below half health
+    bossAttack(b, d.attacks[b.attackIdx++ % d.attacks.length]);
+  }
+}
+
+function fireBullet(x, y, angle, speed, color) {
+  S.bullets.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, r: 7, color });
+}
+
+function bossAttack(b, kind) {
+  const { h } = bossSize(), H = view.H, sp = H * 0.48, x = b.x, y = b.y + h * 0.35, col = b.def.color;
+  const toShip = Math.atan2(S.ship.y - y, S.ship.x - x);
+  if (kind === "aimed") fireBullet(x, y, toShip, sp * 1.1, col);
+  else if (kind === "aimed3") for (const da of [-0.22, 0, 0.22]) fireBullet(x, y, toShip + da, sp, col);
+  else if (kind === "spread") for (let k = -3; k <= 3; k++) fireBullet(x, y, Math.PI / 2 + k * 0.2, sp * 0.85, col);
+  else if (kind === "ring") for (let k = 0; k < 14; k++) fireBullet(x, y - h * 0.2, (k / 14) * Math.PI * 2 + b.t, sp * 0.7, col);
+  else if (kind === "rocks") for (const vx of [-160, 0, 160]) S.asteroids.push(makeAsteroid(x + vx * 0.3, y, rand(18, 28), vx + rand(-30, 30), rand(170, 240)));
+  else if (kind === "spawn") for (const s of [-1, 1]) S.fighters.push(makeFighter(x + s * bossSize().w * 0.4, y));
+  sfx("laser");
+}
+
+// True if (px, py) is inside the boss's oval body grown by `pad`.
+function inBoss(px, py, pad) {
+  const b = S.boss, { w, h } = bossSize();
+  return ((px - b.x) / (w / 2 + pad)) ** 2 + ((py - b.y) / (h / 2 + pad)) ** 2 <= 1;
+}
+
+function damageBoss(dmg, x, y) {
+  const b = S.boss;
+  if (!b || b.entering || b.hp <= 0) return;
+  b.hp = Math.max(0, b.hp - dmg); b.hitT = 0.08;
+  S.score += 5 * dmg;
+  if (x !== undefined) explode(x, y, b.def.color, 4, 120);
+  if (b.hp <= 0) {
+    const { w } = bossSize(), bonus = 1000 * (S.sector + 1);
+    S.score += bonus;
+    for (let k = 0; k < 6; k++) explode(b.x + rand(-w / 2, w / 2), b.y + rand(-30, 30), k % 2 ? "#ffd25e" : b.def.color, 30, 360);
+    floatText(b.x, b.y, `${b.def.name} destroyed! +${bonus}`, "#ffd25e");
+    S.shake = 18; S.bullets = [];
+    S.capsules.push({ x: b.x, y: b.y, vy: 90, kind: "life", r: 20, t: 0 });
+    S.boss = null;
+    sfx("win");
+    setPhase("clear");
+  }
+}
+
+// ---------- Enemies ----------
+function makeFighter(x, y) {
+  return { x, y, vx: 0, vy: 160, r: 18, hp: 2, targetY: view.H * rand(0.12, 0.35), fireT: rand(1, 2), life: rand(7, 9), hitT: 0 };
+}
+
+function hurt() {
+  if (S.invuln > 0) return;
+  S.lives--; S.invuln = 2; S.shake = 14;
+  explode(S.ship.x, S.ship.y, "#ff5ea8", 30, 280);
+  sfx("hit");
+  if (S.lives <= 0) { explode(S.ship.x, S.ship.y, "#5ee0ff", 60, 360); gameOver(false); }
+}
+
+// ---------- Power-ups ----------
+function randomPower() {
+  const entries = Object.entries(POWERS), total = entries.reduce((s, [, p]) => s + p.weight, 0);
+  let r = Math.random() * total;
+  for (const [k, p] of entries) if ((r -= p.weight) <= 0) return k;
+  return "spread";
+}
+
+function collect(kind, x, y) {
+  const p = POWERS[kind];
+  if (kind === "life") S.lives = Math.min(CFG.maxLives, S.lives + 1);
+  else if (kind === "bomb") smartBomb();
+  else S.powers[kind] = p.time;
+  floatText(x, y - 20, p.label + "!", p.color);
+  explode(x, y, p.color, 20, 200);
+  sfx("shield");
+}
+
+function smartBomb() {
+  S.flash = 0.6; S.shake = 10;
+  for (const a of S.asteroids) { explode(a.x, a.y, "#c9a27a", 10, 160); S.score += 10; }
+  for (const f of S.fighters) { explode(f.x, f.y, "#ff6b6b", 12, 180); S.score += 50; }
+  for (const m of S.mines) { explode(m.x, m.y, "#ff6b3d", 12, 180); S.score += 40; }
+  S.asteroids = []; S.fighters = []; S.mines = []; S.bullets = [];
+  if (S.boss) damageBoss(15);
+  sfx("boom");
+}
+
 // ---------- Update ----------
 function update(dt) {
   const { W, H } = view;
-  for (const s of bg) { s.y += dt * 0.05 * s.z * (S.running && !S.paused ? 1 + S.t / 60 : 0.4); if (s.y > 1) { s.y -= 1; s.x = Math.random(); } }
+  for (const s of bg) { s.y += dt * 0.05 * s.z * (S.running && !S.paused ? 1 + S.sector * 0.35 : 0.4); if (s.y > 1) { s.y -= 1; s.x = Math.random(); } }
   updateParticles(dt);
   S.shake = Math.max(0, S.shake - dt * 30);
+  S.flash = Math.max(0, S.flash - dt);
 
   S.waiting = "";
   if (!S.running || S.over) return;
@@ -254,10 +431,13 @@ function update(dt) {
 
   S.t += dt;
   S.score += dt * 10;
-  const d = Math.min(1 + S.t / 35, 4); // difficulty ramp
+  stepPhase(dt);
+  if (S.over) return;
+  const sec = SECTORS[S.sector], progress = S.phase === "play" ? clamp(S.phaseT / sec.time, 0, 1) : 0;
+  const waves = S.phase === "play", bossFight = S.phase === "boss";
 
-  // Ship movement
-  const ship = S.ship, margin = 30, top = H * 0.25, bottom = H - 40;
+  // Ship movement (stays below the boss zone)
+  const ship = S.ship, margin = 30, top = H * 0.3, bottom = H - 40;
   const prevX = ship.x;
   if (S.mode === "face") {
     const ax = faceAxis();
@@ -276,12 +456,16 @@ function update(dt) {
   ship.y = clamp(ship.y, top, bottom);
   ship.tilt += (clamp((ship.x - prevX) / (dt * 600), -1, 1) * 0.4 - ship.tilt) * Math.min(1, dt * 10);
 
-  // Firing
+  for (const k of TIMED) if (S.powers[k] > 0) S.powers[k] = Math.max(0, S.powers[k] - dt);
+
+  // Firing (spread adds two angled shots, rapid halves the cooldown, mega makes fat 2-damage lasers)
   S.fireCd -= dt;
   const firing = S.mode === "face" ? face.jaw > CFG.jawThreshold : keys.has("Space");
   if (firing && S.fireCd <= 0) {
-    S.lasers.push({ x: ship.x - 10, y: ship.y - 18 }, { x: ship.x + 10, y: ship.y - 18 });
-    S.fireCd = CFG.fireCooldown;
+    const mega = S.powers.mega > 0, shots = [[-10, 0], [10, 0]];
+    if (S.powers.spread > 0) shots.push([-14, -280], [14, 280]);
+    for (const [dx, vx] of shots) S.lasers.push({ x: ship.x + dx, y: ship.y - 18, vx, mega });
+    S.fireCd = CFG.fireCooldown * (S.powers.rapid > 0 ? 0.5 : 1);
     sfx("laser");
   }
 
@@ -296,53 +480,99 @@ function update(dt) {
   S.shield = Math.max(0, S.shield - dt);
   S.shieldCd = Math.max(0, S.shieldCd - dt);
 
-  // Spawning
+  // Spawning: full waves while flying the sector, a light trickle of rocks during the boss fight
+  const rate = sec.astRate * (1 + 0.35 * progress) * (bossFight ? 0.3 : 1);
   S.spawnAst -= dt;
-  if (S.spawnAst <= 0) {
+  if (S.spawnAst <= 0 && (waves || bossFight)) {
     const r = rand(16, 44);
-    S.asteroids.push(makeAsteroid(rand(r, W - r), -r, r, rand(-40, 40), rand(110, 190) * (0.75 + 0.3 * d)));
-    S.spawnAst = Math.max(0.22, 1.0 / d) * rand(0.6, 1.3);
+    S.asteroids.push(makeAsteroid(rand(r, W - r), -r, r, rand(-40, 40), rand(110, 190) * sec.astSpeed * (0.9 + 0.25 * progress)));
+    S.spawnAst = Math.max(0.2, 1.0 / rate) * rand(0.6, 1.3);
   }
+  if (waves && sec.fighterGap && (S.spawnFighter -= dt) <= 0) { S.fighters.push(makeFighter(rand(60, W - 60), -30)); S.spawnFighter = sec.fighterGap * rand(0.7, 1.3) * (1 - 0.3 * progress); }
+  if (waves && sec.mineGap && (S.spawnMine -= dt) <= 0) { S.mines.push({ x: rand(60, W - 60), y: -24, vx: rand(-30, 30), vy: rand(60, 95), r: 18, hp: 3, fuse: 0, t: 0 }); S.spawnMine = sec.mineGap * rand(0.7, 1.3); }
   S.spawnStar -= dt;
   if (S.spawnStar <= 0) {
-    S.stars.push({ x: rand(30, W - 30), y: -20, r: 12, vy: rand(120, 170), rot: 0 });
+    S.stars.push({ x: rand(30, W - 30), y: -20, r: 16, vy: rand(120, 170), rot: 0 });
     S.spawnStar = rand(2.5, 5);
+  }
+  if ((waves || bossFight) && (S.spawnPower -= dt) <= 0) {
+    S.capsules.push({ x: rand(60, W - 60), y: -24, vy: rand(90, 130), kind: randomPower(), r: 20, t: 0 });
+    S.spawnPower = bossFight ? rand(7, 10) : rand(9, 14);
   }
 
   // Move entities
-  for (const l of S.lasers) l.y -= 900 * dt;
+  for (const l of S.lasers) { l.y -= 900 * dt; l.x += l.vx * dt; }
   for (const a of S.asteroids) {
     a.x += a.vx * dt; a.y += a.vy * dt; a.rot += a.vr * dt;
     if (a.x < a.r) a.vx = Math.abs(a.vx);
     else if (a.x > W - a.r) a.vx = -Math.abs(a.vx);
   }
   for (const s of S.stars) { s.y += s.vy * dt; s.rot += dt * 2; }
-
-  // Laser vs asteroid
-  for (const l of S.lasers) {
-    for (const a of S.asteroids) {
-      if (!a.dead && !l.dead && dist2(l.x, l.y, a.x, a.y) < a.r * a.r) {
-        l.dead = true;
-        if (--a.hp <= 0) {
-          a.dead = true;
-          S.score += a.r > 30 ? 25 : 10;
-          explode(a.x, a.y, "#c9a27a", 14, 180);
-          sfx("boom");
-          if (a.r > 30) {
-            for (const s of [-1, 1]) S.asteroids.push(makeAsteroid(a.x + s * 10, a.y, a.r * 0.55, s * rand(60, 120), a.vy * 0.9));
-          }
-        } else {
-          explode(l.x, l.y, "#ffffff", 5, 100);
-        }
-      }
+  for (const b of S.bullets) { b.x += b.vx * dt; b.y += b.vy * dt; }
+  for (const f of S.fighters) {
+    f.life -= dt; f.hitT = Math.max(0, f.hitT - dt);
+    if (f.life <= 0) { f.vy = 220; f.vx *= 0.98; }            // leave downward
+    else if (f.y < f.targetY) f.vy = 160;
+    else { f.vy = 0; if (!f.vx) f.vx = rand(110, 170) * (Math.random() < 0.5 ? -1 : 1); }
+    if (f.x < 40) f.vx = Math.abs(f.vx); if (f.x > W - 40) f.vx = -Math.abs(f.vx);
+    f.x += f.vx * dt; f.y += f.vy * dt;
+    if (f.life > 0 && f.y > 0 && (f.fireT -= dt) <= 0) {
+      f.fireT = rand(1.6, 2.6) / (1 + S.sector * 0.12);
+      fireBullet(f.x, f.y + 14, Math.atan2(ship.y - f.y, ship.x - f.x), H * 0.42, "#ff6b6b");
     }
   }
+  for (const m of S.mines) {
+    m.t += dt; m.x += m.vx * dt; m.y += m.vy * dt;
+    if (!m.fuse && dist2(m.x, m.y, ship.x, ship.y) < 120 ** 2) m.fuse = 0.7;   // armed: blinks, then bursts
+    if (m.fuse && (m.fuse -= dt) <= 0) {
+      m.dead = true;
+      for (let k = 0; k < 8; k++) fireBullet(m.x, m.y, (k / 8) * Math.PI * 2, H * 0.4, "#ff6b3d");
+      explode(m.x, m.y, "#ff6b3d", 16, 200); sfx("boom");
+    }
+  }
+  for (const c of S.capsules) {
+    c.t += dt; c.y += c.vy * dt;
+    const d2 = dist2(c.x, c.y, ship.x, ship.y);
+    if (d2 < 150 ** 2) { const d = Math.sqrt(d2) || 1; c.x += ((ship.x - c.x) / d) * 260 * dt; c.y += ((ship.y - c.y) / d) * 260 * dt; } // magnet
+  }
+  updateBoss(dt);
 
-  // Ship vs asteroid / star
-  const shipR = 14;
+  // Lasers vs everything (lasers have extra reach, more with mega)
+  for (const l of S.lasers) {
+    const reach = l.mega ? 16 : CFG.laserR, dmg = l.mega ? 2 : 1;
+    for (const a of S.asteroids) {
+      if (a.dead || l.dead || dist2(l.x, l.y, a.x, a.y) >= (a.r + reach) ** 2) continue;
+      l.dead = true;
+      if ((a.hp -= dmg) <= 0) {
+        a.dead = true;
+        S.score += a.r > 30 ? 25 : 10;
+        explode(a.x, a.y, "#c9a27a", 14, 180);
+        sfx("boom");
+        if (a.r > 30) {
+          for (const s of [-1, 1]) S.asteroids.push(makeAsteroid(a.x + s * 10, a.y, a.r * 0.55, s * rand(60, 120), a.vy * 0.9));
+        }
+      } else {
+        explode(l.x, l.y, "#ffffff", 5, 100);
+      }
+    }
+    for (const f of S.fighters) {
+      if (f.dead || l.dead || dist2(l.x, l.y, f.x, f.y) >= (f.r + reach) ** 2) continue;
+      l.dead = true; f.hitT = 0.1;
+      if ((f.hp -= dmg) <= 0) { f.dead = true; S.score += 50; explode(f.x, f.y, "#ff6b6b", 18, 220); sfx("boom"); }
+    }
+    for (const m of S.mines) {
+      if (m.dead || l.dead || dist2(l.x, l.y, m.x, m.y) >= (m.r + reach) ** 2) continue;
+      l.dead = true;
+      if ((m.hp -= dmg) <= 0) { m.dead = true; S.score += 40; explode(m.x, m.y, "#ff6b3d", 18, 200); sfx("boom"); }
+    }
+    if (!l.dead && S.boss && inBoss(l.x, l.y, reach)) { l.dead = true; damageBoss(dmg, l.x, l.y); }
+  }
+
+  // Ship vs asteroids / enemies / bullets / pickups
+  const shipR = 14, shielded = S.shield > 0;
   for (const a of S.asteroids) {
     if (a.dead) continue;
-    if (S.shield > 0) {
+    if (shielded) {
       // Bounce asteroids off the bubble instead of taking damage
       const reach = CFG.shieldR + a.r * 0.85;
       if (dist2(ship.x, ship.y, a.x, a.y) < reach ** 2) {
@@ -356,41 +586,56 @@ function update(dt) {
       }
       continue;
     }
-    if (S.invuln <= 0 && dist2(ship.x, ship.y, a.x, a.y) < (a.r * 0.85 + shipR) ** 2) {
-      a.dead = true;
-      S.lives--; S.invuln = 2; S.shake = 14;
-      explode(ship.x, ship.y, "#ff5ea8", 30, 280);
-      sfx("hit");
-      if (S.lives <= 0) { explode(ship.x, ship.y, "#5ee0ff", 60, 360); gameOver(); }
-    }
+    if (S.invuln <= 0 && dist2(ship.x, ship.y, a.x, a.y) < (a.r * 0.85 + shipR) ** 2) { a.dead = true; hurt(); }
   }
+  for (const b of S.bullets) {
+    if (shielded && dist2(ship.x, ship.y, b.x, b.y) < (CFG.shieldR + b.r) ** 2) { b.dead = true; S.score += 2; explode(b.x, b.y, "#c58bff", 4, 100); continue; }
+    if (dist2(ship.x, ship.y, b.x, b.y) < (shipR + b.r * 0.7) ** 2) { b.dead = true; hurt(); }
+  }
+  for (const f of S.fighters) if (!f.dead && dist2(ship.x, ship.y, f.x, f.y) < (f.r + (shielded ? CFG.shieldR : shipR)) ** 2) { f.dead = true; explode(f.x, f.y, "#ff6b6b", 18, 220); if (!shielded) hurt(); }
+  for (const m of S.mines) if (!m.dead && dist2(ship.x, ship.y, m.x, m.y) < (m.r + (shielded ? CFG.shieldR : shipR)) ** 2) { m.dead = true; explode(m.x, m.y, "#ff6b3d", 18, 200); if (!shielded) hurt(); }
+  if (S.boss && !S.boss.entering && inBoss(ship.x, ship.y, shipR) && !shielded) hurt();
   for (const s of S.stars) {
-    if (!s.dead && dist2(ship.x, ship.y, s.x, s.y) < (s.r + 22) ** 2) {
+    if (!s.dead && dist2(ship.x, ship.y, s.x, s.y) < (s.r + 26) ** 2) {
       s.dead = true; S.score += 50;
       explode(s.x, s.y, "#ffd25e", 16, 160);
       sfx("star");
     }
   }
+  for (const c of S.capsules) if (!c.dead && dist2(ship.x, ship.y, c.x, c.y) < (c.r + 28) ** 2) { c.dead = true; collect(c.kind, c.x, c.y); }
   S.invuln = Math.max(0, S.invuln - dt);
 
   // Cleanup
-  S.lasers = S.lasers.filter((l) => !l.dead && l.y > -20);
+  const onScreen = (o, pad = 40) => o.x > -pad && o.x < W + pad && o.y > -pad - 80 && o.y < H + pad;
+  S.lasers = S.lasers.filter((l) => !l.dead && l.y > -20 && l.x > -20 && l.x < W + 20);
   S.asteroids = S.asteroids.filter((a) => !a.dead && a.y < H + a.r + 10 && a.y > -a.r - 80); // bounced ones may fly off the top
   S.stars = S.stars.filter((s) => !s.dead && s.y < H + 30);
+  S.bullets = S.bullets.filter((b) => !b.dead && onScreen(b, 20));
+  S.fighters = S.fighters.filter((f) => !f.dead && f.y < H + 40);
+  S.mines = S.mines.filter((m) => !m.dead && m.y < H + 40);
+  S.capsules = S.capsules.filter((c) => !c.dead && c.y < H + 40);
   updateHud();
 }
 
 function updateParticles(dt) {
   for (const p of S.particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.97; p.vy *= 0.97; p.life -= dt; }
   S.particles = S.particles.filter((p) => p.life > 0);
+  for (const t of S.texts) { t.y -= 40 * dt; t.life -= dt; }
+  S.texts = S.texts.filter((t) => t.life > 0);
 }
 
 // ---------- Render ----------
 function render(now) {
   const { W, H } = view;
+  const sec = SECTORS[S.sector] || SECTORS[0];
   ctx.save();
-  ctx.fillStyle = "#05060f";
+  ctx.fillStyle = S.running ? sec.bg : "#05060f";
   ctx.fillRect(0, 0, W, H);
+  if (S.running) { // faint nebula in the sector's colour
+    const g = ctx.createRadialGradient(W * 0.7, H * 0.3, 0, W * 0.7, H * 0.3, Math.max(W, H) * 0.7);
+    g.addColorStop(0, `rgba(${sec.neb},0.12)`); g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
   if (S.shake > 0) ctx.translate(rand(-S.shake, S.shake), rand(-S.shake, S.shake));
 
   for (const s of bg) {
@@ -400,11 +645,23 @@ function render(now) {
   }
 
   for (const s of S.stars) drawStar(s);
+  for (const c of S.capsules) drawCapsule(c, now);
   for (const a of S.asteroids) drawAsteroid(a);
+  for (const m of S.mines) drawMine(m, now);
+  for (const f of S.fighters) drawFighter(f);
+  if (S.boss) drawBoss(S.boss, now);
 
-  ctx.fillStyle = "#5ee0ff";
-  ctx.shadowColor = "#5ee0ff"; ctx.shadowBlur = 10;
-  for (const l of S.lasers) ctx.fillRect(l.x - 1.5, l.y - 10, 3, 14);
+  ctx.shadowBlur = 10;
+  for (const l of S.lasers) {
+    const col = l.mega ? "#ff8787" : "#5ee0ff", w = l.mega ? 8 : 3;
+    ctx.fillStyle = col; ctx.shadowColor = col;
+    ctx.fillRect(l.x - w / 2, l.y - 10, w, 16);
+  }
+  for (const b of S.bullets) {
+    ctx.fillStyle = b.color; ctx.shadowColor = b.color;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.4, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.shadowBlur = 0;
 
   if (S.running && !(S.over && S.lives <= 0)) {
@@ -419,9 +676,15 @@ function render(now) {
     ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
   }
   ctx.globalAlpha = 1;
+  ctx.font = "700 18px system-ui, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const t of S.texts) { ctx.globalAlpha = clamp(t.life, 0, 1); ctx.fillStyle = t.color; ctx.fillText(t.text, t.x, t.y); }
+  ctx.globalAlpha = 1;
   ctx.restore();
 
+  if (S.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${S.flash * 0.6})`; ctx.fillRect(0, 0, W, H); }
+  if (S.boss && !S.boss.entering) drawBossBar(S.boss);
   if (S.waiting) drawBanner(ctx, W, H, S.waiting);
+  else if (S.running && !S.over && ["intro", "warning", "clear"].includes(S.phase)) drawBanner(ctx, W, H, S.banner, S.phase === "warning" ? "#ff6b6b" : S.phase === "clear" ? "#69db7c" : "#ffffff");
 }
 
 function drawShip(ship, now) {
@@ -431,7 +694,8 @@ function drawShip(ship, now) {
   const fl = 10 + Math.sin(now / 40) * 4;
   ctx.fillStyle = "#ffb35e";
   ctx.beginPath(); ctx.moveTo(-6, 14); ctx.lineTo(0, 14 + fl); ctx.lineTo(6, 14); ctx.closePath(); ctx.fill();
-  ctx.shadowColor = "#5ee0ff"; ctx.shadowBlur = 16;
+  const glow = S.powers.mega > 0 ? "#ff8787" : S.powers.rapid > 0 ? "#ffd43b" : S.powers.spread > 0 ? "#69db7c" : "#5ee0ff";
+  ctx.shadowColor = glow; ctx.shadowBlur = 16;
   ctx.fillStyle = "#dff8ff";
   ctx.beginPath();
   ctx.moveTo(0, -22); ctx.lineTo(16, 14); ctx.lineTo(0, 8); ctx.lineTo(-16, 14); ctx.closePath();
@@ -483,6 +747,102 @@ function drawStar(s) {
   }
   ctx.closePath(); ctx.fill();
   ctx.restore();
+}
+
+// Power capsule: glowing pill with the power's icon.
+function drawCapsule(c, now) {
+  const p = POWERS[c.kind], r = c.r;
+  ctx.save();
+  ctx.translate(c.x, c.y + Math.sin(c.t * 4) * 3);
+  ctx.shadowColor = p.color; ctx.shadowBlur = 18 + Math.sin(now / 120) * 6;
+  ctx.fillStyle = "rgba(10,14,32,0.85)";
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = p.color; ctx.lineWidth = 3; ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = p.color; ctx.font = `800 ${Math.round(r * 1.05)}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(p.icon, 0, 1);
+  ctx.restore();
+}
+
+function drawFighter(f) {
+  ctx.save();
+  ctx.translate(f.x, f.y);
+  ctx.shadowColor = "#ff6b6b"; ctx.shadowBlur = 12;
+  ctx.fillStyle = f.hitT > 0 ? "#ffffff" : "#ff6b6b";
+  ctx.beginPath(); ctx.moveTo(0, 18); ctx.lineTo(16, -12); ctx.lineTo(0, -4); ctx.lineTo(-16, -12); ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#2b0a0a"; ctx.beginPath(); ctx.arc(0, 2, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+function drawMine(m, now) {
+  ctx.save();
+  ctx.translate(m.x, m.y); ctx.rotate(m.t * 1.5);
+  const hot = m.fuse && Math.floor(now / 80) % 2 === 0;
+  ctx.fillStyle = hot ? "#ffd25e" : "#ff6b3d";
+  for (let k = 0; k < 8; k++) { ctx.rotate(Math.PI / 4); ctx.fillRect(-2, -m.r - 5, 4, 8); }
+  ctx.beginPath(); ctx.arc(0, 0, m.r * 0.75, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#2b0a0a"; ctx.beginPath(); ctx.arc(0, 0, m.r * 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// Bosses: each kind has its own silhouette, drawn around (0, 0) inside a w × h oval.
+function drawBoss(b, now) {
+  const { w, h } = bossSize(), d = b.def, col = b.hitT > 0 ? "#ffffff" : d.color;
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.shadowColor = d.color; ctx.shadowBlur = 25;
+  if (d.kind === "rock") {
+    ctx.fillStyle = "#5a4a3c"; ctx.strokeStyle = col; ctx.lineWidth = 4;
+    ctx.beginPath();
+    for (let k = 0; k < 14; k++) { const a = (k / 14) * Math.PI * 2, m = 0.85 + ((k * 7) % 5) * 0.05; ctx.lineTo(Math.cos(a) * w * 0.5 * m, Math.sin(a) * h * 0.55 * m); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    for (const s of [-1, 1]) { ctx.fillStyle = "#ff3b3b"; ctx.beginPath(); ctx.arc(s * w * 0.14, -h * 0.05, h * 0.09, 0, Math.PI * 2); ctx.fill(); }
+  } else if (d.kind === "saucer") {
+    ctx.fillStyle = "rgba(197,139,255,0.35)";
+    ctx.beginPath(); ctx.ellipse(0, -h * 0.12, w * 0.22, h * 0.35, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(0, h * 0.05, w * 0.5, h * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    for (let k = -3; k <= 3; k++) { ctx.fillStyle = Math.floor(now / 150 + k) % 2 ? "#ffd25e" : "#ffffff"; ctx.beginPath(); ctx.arc(k * w * 0.12, h * 0.07, h * 0.05, 0, Math.PI * 2); ctx.fill(); }
+  } else if (d.kind === "cruiser") {
+    ctx.fillStyle = "#3a2018"; ctx.strokeStyle = col; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-w * 0.5, -h * 0.2); ctx.lineTo(w * 0.5, -h * 0.2); ctx.lineTo(w * 0.35, h * 0.3); ctx.lineTo(0, h * 0.5); ctx.lineTo(-w * 0.35, h * 0.3); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.fillStyle = col;
+    for (const s of [-0.3, 0, 0.3]) ctx.fillRect(s * w - 6, h * 0.05, 12, h * 0.3);
+    ctx.fillStyle = "#ffd25e"; ctx.beginPath(); ctx.arc(0, 0, h * 0.1, 0, Math.PI * 2); ctx.fill();
+  } else if (d.kind === "hive") {
+    ctx.fillStyle = "#123a1e"; ctx.strokeStyle = col; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.ellipse(0, 0, w * 0.48, h * 0.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2 + b.t * 0.5, pulse = 1 + Math.sin(now / 200 + k) * 0.15;
+      ctx.fillStyle = "rgba(105,219,124,0.75)";
+      ctx.beginPath(); ctx.arc(Math.cos(a) * w * 0.28, Math.sin(a) * h * 0.28, h * 0.1 * pulse, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = "#ffd25e"; ctx.beginPath(); ctx.arc(0, 0, h * 0.12, 0, Math.PI * 2); ctx.fill();
+  } else {
+    ctx.fillStyle = "#1a0d1a"; ctx.strokeStyle = col; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, h * 0.55); ctx.lineTo(w * 0.5, -h * 0.1); ctx.lineTo(w * 0.3, -h * 0.45); ctx.lineTo(-w * 0.3, -h * 0.45); ctx.lineTo(-w * 0.5, -h * 0.1); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.shadowBlur = 0;
+    const pulse = 0.6 + 0.4 * Math.sin(now / 150);
+    ctx.fillStyle = `rgba(255,94,168,${pulse})`; ctx.beginPath(); ctx.arc(0, 0, h * 0.16, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 2;
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * w * 0.15, -h * 0.3); ctx.lineTo(s * w * 0.42, -h * 0.1); ctx.stroke(); }
+  }
+  ctx.restore();
+}
+
+function drawBossBar(b) {
+  const { W } = view, bw = Math.min(W * 0.5, 420), x = (W - bw) / 2, y = W < 800 ? 120 : 70; // below the HUD on narrow screens
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(x - 3, y - 3, bw + 6, 16);
+  ctx.fillStyle = b.def.color; ctx.fillRect(x, y, bw * (b.hp / b.def.hp), 10);
+  ctx.font = "700 13px system-ui, sans-serif"; ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  ctx.fillText(b.def.name, W / 2, y - 5);
 }
 
 // ---------- Main loop ----------

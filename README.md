@@ -6,18 +6,27 @@ Five browser games you control with your **face** or **hands** through a webcam.
 
 | Game | Players | Head | Open mouth | Pucker lips | Keyboard |
 |---|---|---|---|---|---|
-| **Face Pilot** — space shooter | 1 | steer ship | fire | shield bubble (2.5 s, 8 s cooldown) | Arrows/WASD · Space · X |
-| **Face Jump** — Mario-style platformer | 1 | lean/turn to run | jump (keep open = higher) | blow a bubble that traps a slime — touch it to pop | ←→/AD · Space/↑ · X |
-| **Face Pong** — head-to-head pong | 2 (or vs computer) | up/down moves paddle | at impact → power shot | at impact → curve shot (once per rally) | P1 W/S · D · A — P2 ↑/↓ · ← · → |
+| **Face Pilot** — space shooter, 5 sectors + bosses | 1 | steer ship | fire | shield bubble (2.5 s, 8 s cooldown; blocks shots) | Arrows/WASD · Space · X |
+| **Face Jump** — Mario-style platformer, 4 worlds + bosses | 1 | lean/turn to run | jump (keep open = higher) | blow a bubble that traps an enemy (touch to pop) or stuns a boss | ←→/AD · Space/↑ · X |
+| **Face Pong** — head-to-head pong | 2 (or 5-boss tournament) | up/down moves paddle | at impact → power shot | at impact → curve shot (once per rally) | P1 W/S · D · A — P2 ↑/↓ · ← · → |
 
 Hand games:
 
 | Game | Players | Hands | Fallback |
 |---|---|---|---|
 | **Hand Ninja** — Fruit Ninja-style slicing duel | 2 (or 1) | index fingertip is your blade — swipe fast through fruit (it slices everything it sweeps through); 5 stages of rising speed, each ending in a boss to slash before it escapes; power orbs: ❄ freeze, ⚡ mega blade, ×2 points, 🍉 fruit frenzy; streak multiplier up to ×4; avoid bombs (−10, blade jams 1 s) | mouse / touch (solo) |
-| **Hand Hockey** — air hockey | 2 (or vs computer) | your palm moves your mallet in your half; swing into the puck for a hard shot | P1 WASD — P2 arrows |
+| **Hand Hockey** — air hockey | 2 (or 5-boss tournament) | your palm moves your mallet in your half; swing into the puck for a hard shot | P1 WASD — P2 arrows |
 
 Pick a game on the start screen (`index.html`).
+
+Every game has levels and bosses:
+
+- **Face Pilot:** 5 sectors (more asteroids, then fighters and mines) each ending in a boss — Rock Titan, Saucer Queen, Pirate Cruiser, Hive Mother, Void Dreadnought. Capsules: spread shot, rapid fire, mega laser, extra life, smart bomb.
+- **Face Jump:** 4 worlds (Grassland, Desert, Caves, Castle) with spiky slimes and bats; stomp the boss at the end of each world (King Slime, Spike Shell, Bat Baron, Lava Golem) to open the gate to the flag. ? blocks hide a star (invincible), feather (double jump) or extra life.
+- **Hand Ninja:** 5 stages with a boss each, power orbs, streak multiplier.
+- **Face Pong / Hand Hockey:** solo tournament against 5 computer bosses with their own tricks; power orbs in every mode (big paddle/mallet, multi-ball/puck, freeze opponent, goal guard).
+
+Menus have a "start at stage/sector/world" setting for practice.
 
 ## Run locally
 

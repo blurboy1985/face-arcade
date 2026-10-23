@@ -17,9 +17,12 @@
 <div id="hud" class="hidden">
   <div>
     <div class="big">Score <span id="score">0</span> · ◎ <span id="coins">0</span></div>
-    <div class="small">Time <span id="time">0</span> · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit</div>
+    <div class="small">World <span id="world">1</span> · Time <span id="time">0</span> · <kbd>C</kbd> recalibrate · <kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>N</kbd> music · <kbd>Q</kbd> quit</div>
   </div>
-  <div id="lives" class="hearts right"></div>
+  <div class="right">
+    <div id="lives" class="hearts"></div>
+    <div class="small" id="power-status"></div>
+  </div>
 </div>
 
 <div id="cam-panel" class="hidden">
@@ -35,7 +38,8 @@
 <div id="menu" class="screen">
   <div class="card">
     <h1>Face Jump</h1>
-    <p>Run and jump to the flag!<br>Lean or turn your head left/right to run.<br>Open your mouth to jump — keep it open to jump higher.<br>Pucker your lips to blow a <b>bubble</b> that traps slimes — touch a trapped slime to pop it!<br>Stomp slimes, bump <b>?</b> blocks, collect coins.</p>
+    <p>Run and jump through <b>4 worlds</b> — Grassland, Desert, Caves and Castle.<br>Lean or turn your head left/right to run.<br>Open your mouth to jump — keep it open to jump higher.<br>Pucker your lips to blow a <b>bubble</b> that traps enemies and stuns bosses.<br>
+      Beat the <b>boss</b> at the end of each world (stomp its head!) to open the gate to the flag.</p>
     <div class="btns">
       <button id="btn-face">Play with Face (webcam)</button>
       <button id="btn-keys" class="secondary">Play with Keyboard</button>
@@ -52,8 +56,12 @@
         <input id="jaw" type="range" min="0.1" max="0.7" step="0.05" value="0.3"></label>
       <label>Pucker trigger level <span id="pucker-val">0.35</span>
         <input id="pucker" type="range" min="0.15" max="0.7" step="0.05" value="0.35"></label>
+      <label>Start at world <span id="start-val">1 · Grassland</span>
+        <input id="start-world" type="range" min="1" max="4" step="1" value="1"></label>
     </div>
     <div class="help">
+      Power-ups hide in some <b>?</b> blocks: <b style="color:#ffd25e">★ star</b> invincible for 8 s · <b style="color:#9be7ff">🪶 feather</b> double jump for 15 s · <b style="color:#ff5ea8">♥</b> extra life.<br>
+      Red <b>spiky slimes</b> can't be stomped — bubble them. Bats fly in the Caves and Castle.<br>
       Face: sit centered, relaxed, and hold still for a second to calibrate. Small head moves = stand still.<br>
       Keyboard: <kbd>←→</kbd>/<kbd>AD</kbd> run · <kbd>Space</kbd>/<kbd>↑</kbd> jump (hold = higher) · <kbd>X</kbd> bubble<br>
       Video stays on your computer; nothing is uploaded.
@@ -87,8 +95,10 @@ const CFG = {
   deadzone: 0.2,       // fraction of the range that counts as "standing still"
   jawThreshold: 0.3,
   puckerThreshold: 0.35, // lip pucker above resting level that blows a bubble
-  trapTime: 4,           // seconds a slime stays trapped in a bubble
-  lives: 3,
+  trapTime: 4,           // seconds an enemy stays trapped in a bubble
+  lives: 3, maxLives: 5,
+  startWorld: 1,
+  starTime: 8, featherTime: 15, bossStun: 2.2,
 };
 // Full (held) jump rises ~5 tiles so the brick/? platforms 4 tiles above the ground are easy to land on;
 // a quick tap is a ~2.5-tile hop.
@@ -97,62 +107,166 @@ const PHYS = {
   maxRun: 8, accelGround: 45, accelAir: 28, decelGround: 40, decelAir: 10,
   coyote: 0.1, jumpBuffer: 0.15,
 };
-const SOLID = new Set(["#", "B", "?", "U", "P", "S"]);
+const SOLID = new Set(["#", "B", "?", "U", "P", "S", "G"]);
+
+// Each world: its look, plus the boss waiting in the arena at the end.
+const WORLDS = [
+  { name: "Grassland", sky: ["#5aa9ff", "#bfe6ff"], hills: ["#6fcf73", "#5cbf68"], dirt: ["#9a5b2c", "#7d4520"], top: ["#3fb24a", "#2e8f38"], clouds: true },
+  { name: "Desert", sky: ["#ff9f5a", "#ffe3b3"], hills: ["#e8b46c", "#d9a05b"], dirt: ["#d39b55", "#b07a3c"], top: ["#f2cf86", "#d9b066"], clouds: true },
+  { name: "Caves", sky: ["#15102a", "#2e2550"], hills: ["#2b2445", "#231d3a"], dirt: ["#4f4f63", "#3c3c4d"], top: ["#7b7b95", "#62627a"], clouds: false },
+  { name: "Castle", sky: ["#2a0b14", "#5a1a1a"], hills: ["#3a1520", "#2d101a"], dirt: ["#4a4a55", "#383842"], top: ["#6c6c78", "#55555f"], clouds: false, lava: true },
+];
+const BOSSES = [
+  { name: "King Slime", hp: 3, w: 2.6, h: 2.2, color: "#8e44ad", move: "hop" },
+  { name: "Spike Shell", hp: 3, w: 2.2, h: 1.6, color: "#c0392b", move: "charge", spiky: true },
+  { name: "Bat Baron", hp: 4, w: 2.4, h: 1.5, color: "#4b3a6b", move: "swoop" },
+  { name: "Lava Golem", hp: 5, w: 2.6, h: 2.6, color: "#d35400", move: "hop", fireballs: true },
+];
+const POWER_INFO = {
+  star: { label: "★ Star", color: "#ffd25e" },
+  feather: { label: "🪶 Double jump", color: "#9be7ff" },
+  heart: { label: "♥ Extra life", color: "#ff5ea8" },
+};
+
 let sensitivity = 1;
 $("sens").addEventListener("input", (e) => { sensitivity = +e.target.value; $("sens-val").textContent = sensitivity.toFixed(1) + "×"; });
 $("jaw").addEventListener("input", (e) => { CFG.jawThreshold = +e.target.value; $("jaw-val").textContent = CFG.jawThreshold.toFixed(2); });
 $("pucker").addEventListener("input", (e) => { CFG.puckerThreshold = +e.target.value; $("pucker-val").textContent = CFG.puckerThreshold.toFixed(2); });
+$("start-world").addEventListener("input", (e) => { CFG.startWorld = +e.target.value; $("start-val").textContent = `${CFG.startWorld} · ${WORLDS[CFG.startWorld - 1].name}`; });
 
-// ---------- Level ----------
-// '#' ground, 'B' brick, '?' coin block, 'U' used block, 'P' pipe, 'S' stone, 'o' coin, '.' air.
-function buildLevel() {
-  const LW = 212, LH = 15;
+// ---------- Levels ----------
+// '#' ground, 'B' brick, '?' coin block, 'U' used block, 'P' pipe, 'S' stone, 'G' boss gate, 'o' coin, '.' air.
+// Every level ends with: a run-up (checkpoint), a flat boss arena, a gate that opens when the boss falls, the flag.
+function makeGrid(LW, LH) {
   const t = Array.from({ length: LH }, () => Array(LW).fill("."));
   const set = (x, y, c) => { if (x >= 0 && x < LW && y >= 0 && y < LH) t[y][x] = c; };
-  const ground = (x0, x1) => { for (let x = x0; x <= x1; x++) { set(x, 13, "#"); set(x, 14, "#"); } };
-  const row = (x0, x1, y, c) => { for (let x = x0; x <= x1; x++) set(x, y, c); };
-  const pipe = (x, h) => { for (let y = 13 - h; y < 13; y++) { set(x, y, "P"); set(x + 1, y, "P"); } };
-  const stairsUp = (x, n) => { for (let i = 0; i < n; i++) for (let y = 12 - i; y <= 12; y++) set(x + i, y, "S"); };
-  const stairsDown = (x, n) => { for (let i = 0; i < n; i++) for (let y = 12 - (n - 1 - i); y <= 12; y++) set(x + i, y, "S"); };
-  const enemies = [];
+  return {
+    t, set,
+    ground: (x0, x1) => { for (let x = x0; x <= x1; x++) { set(x, 13, "#"); set(x, 14, "#"); } },
+    row: (x0, x1, y, c) => { for (let x = x0; x <= x1; x++) set(x, y, c); },
+    pipe: (x, h) => { for (let y = 13 - h; y < 13; y++) { set(x, y, "P"); set(x + 1, y, "P"); } },
+    stairsUp: (x, n) => { for (let i = 0; i < n; i++) for (let y = 12 - i; y <= 12; y++) set(x + i, y, "S"); },
+    stairsDown: (x, n) => { for (let i = 0; i < n; i++) for (let y = 12 - (n - 1 - i); y <= 12; y++) set(x + i, y, "S"); },
+  };
+}
 
-  ground(0, 44); ground(47, 78); ground(82, 122); ground(125, 152); ground(156, LW - 1);
+// Adds the arena, gate and flag starting at x; returns the finished level.
+function finishLevel(g, x, LW, LH, enemies, checkpoints, powers) {
+  g.ground(x, LW - 1);
+  checkpoints.push(x + 1);
+  const arenaX0 = x + 5, gateX = arenaX0 + 22;
+  for (let y = 0; y <= 12; y++) g.set(gateX, y, "G");
+  return { t: g.t, LW, LH, enemies, checkpoints, powers, arenaX0, gateX, flagX: gateX + 5 };
+}
+
+// World 1: the hand-built Grassland level.
+function buildGrassland() {
+  const LW = 248, LH = 15, g = makeGrid(LW, LH), { set, ground, row, pipe, stairsUp, stairsDown } = g;
+  const enemies = [];
+  const slimes = (...xs) => xs.forEach((x) => enemies.push({ x, kind: "slime" }));
+
+  ground(0, 44); ground(47, 78); ground(82, 122); ground(125, 152); ground(156, 196);
 
   // Warm-up: blocks and pipes
   set(10, 9, "?");
   row(14, 18, 9, "B"); set(15, 9, "?"); set(17, 9, "?"); set(16, 5, "?");
   pipe(23, 2); pipe(31, 3); pipe(39, 3);
   row(44, 47, 9, "o");                       // coins over the first pit
-  enemies.push(17, 27, 35);
+  slimes(17, 27, 35);
 
   // Two-level brick bridge
   row(52, 59, 9, "B"); set(55, 9, "?");
   row(53, 58, 6, "B"); set(56, 6, "?");
   row(53, 58, 5, "o");
-  enemies.push(62, 64, 70);
+  slimes(62, 64, 70);
   row(78, 82, 8, "o");                       // coins over the second pit
 
   // Middle
   row(88, 90, 9, "?"); set(89, 5, "?");
-  enemies.push(92, 94);
+  slimes(92, 94);
   row(98, 103, 9, "B"); row(99, 102, 8, "o");
   pipe(108, 2); pipe(116, 3);
-  enemies.push(112, 120);
+  slimes(112, 120);
 
   // Stairs and a brick run
   stairsUp(128, 4); stairsDown(132, 4);      // one solid pyramid (a gap between could trap the player)
   row(140, 144, 9, "B"); set(142, 9, "?"); row(140, 144, 8, "o");
-  enemies.push(139, 143, 146);
+  slimes(139, 143, 146);
   stairsUp(149, 4);                           // jump from the top across the pit (153–155)
 
   // Final stretch
   row(161, 165, 9, "o");
   pipe(168, 2); pipe(178, 2);
-  enemies.push(172, 175, 182);
-  stairsUp(186, 8);
+  slimes(172, 175, 182);
+  stairsUp(186, 8); stairsDown(194, 3);
 
-  return { t, LW, LH, enemies, flagX: 202, checkpoints: [2, 84, 157] };
+  const powers = new Map([["16,5", "feather"], ["56,6", "star"], ["89,5", "heart"], ["142,9", "star"]]);
+  return finishLevel(g, 197, LW, LH, enemies, [2, 84, 157], powers);
 }
+
+// Small seeded RNG so generated worlds are the same every time you play.
+function mulberry32(seed) {
+  return () => {
+    seed |= 0; seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Worlds 2–4: built from chunks that are always clearable (pits ≤ 4 wide vs a ~8-tile jump,
+// walls ≤ 4–5 high vs a ~5-tile jump). Harder worlds use wider pits, taller pipes and more enemies.
+function buildGenerated(world) {
+  const r = mulberry32(7919 * (world + 1)), ri = (a, b) => a + Math.floor(r() * (b - a + 1));
+  const LH = 15, LW = 300, g = makeGrid(LW, LH), { set, ground, row, pipe, stairsUp, stairsDown } = g;
+  const enemies = [], powers = new Map(), checkpoints = [2];
+  const pitMax = [0, 3, 4, 4][world], pipeMax = [0, 3, 3, 4][world], foes = [0, 1, 2, 2][world];
+  const kinds = world >= 2 ? ["slime", "spiky", "bat", "slime"] : ["slime", "spiky", "slime"];
+  const foe = (x) => { const kind = kinds[Math.floor(r() * kinds.length)]; enemies.push({ x, kind, baseY: ri(7, 10) }); };
+  const POW = ["star", "feather", "heart", "feather", "star"];
+  const end = 220;
+  let x = 12, nextCp = end / 3;
+  ground(0, 11);
+  while (x < end) {
+    if (x > nextCp) { checkpoints.push(x + 1); nextCp += end / 3; }
+    const type = ["flat", "pit", "pipes", "blocks", "stairs", "pit", "platform"][Math.floor(r() * 7)];
+    if (type === "flat") {
+      const len = ri(7, 10);
+      ground(x, x + len - 1); row(x + 2, x + 4, 10, "o");
+      for (let k = 0; k < ri(1, foes + 1); k++) foe(x + ri(3, len - 2));
+      x += len;
+    } else if (type === "pit") {
+      const w = ri(2, pitMax);
+      ground(x, x + 2); x += 3;
+      row(x, x + w - 1, 9, "o"); x += w;
+      ground(x, x + 3); x += 4;
+    } else if (type === "pipes") {
+      const len = ri(11, 14);
+      ground(x, x + len - 1); pipe(x + 2, ri(2, pipeMax)); pipe(x + len - 4, ri(2, pipeMax));
+      foe(x + 6);
+      x += len;
+    } else if (type === "blocks") {
+      const len = ri(10, 13), bw = ri(3, 5), bx = x + 3, q = bx + ri(0, bw - 1);
+      ground(x, x + len - 1); row(bx, bx + bw - 1, 9, "B"); set(q, 9, "?");
+      if (r() < 0.6) powers.set(`${q},9`, POW[Math.floor(r() * POW.length)]);
+      if (r() < 0.5) row(bx, bx + bw - 1, 5, "o");
+      foe(x + len - 3);
+      x += len;
+    } else if (type === "stairs") {
+      const n = ri(3, world >= 2 ? 5 : 4);
+      ground(x, x + 2 * n + 3); stairsUp(x + 2, n); stairsDown(x + 2 + n, n);
+      x += 2 * n + 4;
+    } else { // floating stone platform between two short pits
+      ground(x, x + 2); x += 3;
+      row(x + 2, x + 4, 10, "S"); row(x + 2, x + 4, 9, "o");
+      x += 7;
+      ground(x, x + 3); x += 4;
+    }
+  }
+  return finishLevel(g, x, LW, LH, enemies, checkpoints, powers);
+}
+
+const buildWorld = (world) => (world === 0 ? buildGrassland() : buildGenerated(world));
 
 // ---------- Input ----------
 const keys = trackKeys((code) => {
@@ -225,25 +339,39 @@ function drawCamOverlay(faces) {
 // ---------- Game state ----------
 const S = {
   mode: null, running: false, paused: false, over: false, won: false, waiting: "",
-  level: null, P: null, enemies: [], pops: [], particles: [], bumps: new Map(),
-  score: 0, coins: 0, lives: CFG.lives, time: 0, checkpoint: 2, invuln: 0, dying: 0, winTimer: 0,
+  world: 0, level: null, P: null, enemies: [], pops: [], particles: [], bumps: new Map(), items: [], fireballs: [], boss: null,
+  score: 0, coins: 0, lives: CFG.lives, time: 0, checkpoint: 2, invuln: 0, dying: 0, winTimer: 0, introT: 0,
   jumpBuffer: 0, coyote: 0, prevJump: false, camX: 0, best: loadNum("faceJumpBest"), bubble: null, prevPucker: false,
+  starT: 0, featherT: 0, usedDouble: false,
 };
 // Handy for debugging in the console; step(dt) advances the game without waiting for animation frames.
-window.faceJump = { S, music, face, calib, tracker, keys, step: (dt = 1 / 60) => { update(dt); render(performance.now()); } };
+window.faceJump = {
+  S, music, face, calib, tracker, keys, CFG, WORLDS, BOSSES, buildWorld,
+  start: (mode = "keys") => startGame(mode), goto: (world) => { S.world = world - 1; loadWorld(); },
+  give: (kind) => collectPower(kind), step: (dt = 1 / 60, draw = true) => { update(dt); if (draw) render(performance.now()); },
+};
 
 function newPlayer(x) { return { x, y: 13 - 0.95, w: 0.7, h: 0.95, vx: 0, vy: 0, onGround: false, facing: 1 }; }
 
+function makeEnemy(e, world) {
+  const speed = 2 + world * 0.4;
+  return { x: e.x, y: e.kind === "bat" ? e.baseY : 12.1, w: 0.9, h: e.kind === "bat" ? 0.7 : 0.9, kind: e.kind, baseY: e.baseY ?? 9, t: e.x,
+    vx: -speed, vy: 0, active: false, squash: 0, flipped: false, dead: false, trapped: 0, rise: 0 };
+}
+
+function makeBoss(world, L) {
+  const def = BOSSES[world];
+  const x = L.gateX - 3 - def.w;
+  return { def, hp: def.hp, w: def.w, h: def.h, x, y: def.move === "swoop" ? 4 : 13 - def.h, homeX: x, vx: 0, vy: 0, t: 0,
+    state: "wait", stateT: 1.2, inv: 0, stun: 0, active: false, dead: false, onGround: true, dir: -1 };
+}
+
 function startGame(mode) {
-  const level = buildLevel();
   Object.assign(S, {
-    mode, running: true, paused: false, over: false, won: false, level,
-    P: newPlayer(level.checkpoints[0]),
-    enemies: level.enemies.map((x) => ({ x, y: 12.1, w: 0.9, h: 0.9, vx: -2, vy: 0, active: false, squash: 0, flipped: false, dead: false, trapped: 0, rise: 0 })),
-    pops: [], particles: [], bumps: new Map(),
-    score: 0, coins: 0, lives: CFG.lives, time: 0, checkpoint: level.checkpoints[0], invuln: 1, dying: 0, winTimer: 0,
-    jumpBuffer: 0, coyote: 0, prevJump: false, camX: 0, bubble: null, prevPucker: false,
+    mode, running: true, paused: false, over: false, world: CFG.startWorld - 1,
+    score: 0, coins: 0, lives: CFG.lives, camX: 0,
   });
+  loadWorld();
   keys.clear();
   music.restart();
   unlockAudio();
@@ -255,14 +383,27 @@ function startGame(mode) {
   updateHud(true);
 }
 
+// Fresh level for the current world; score, coins and lives carry over.
+function loadWorld() {
+  const level = buildWorld(S.world);
+  Object.assign(S, {
+    won: false, level, P: newPlayer(level.checkpoints[0]),
+    enemies: level.enemies.map((e) => makeEnemy(e, S.world)),
+    boss: makeBoss(S.world, level), items: [], fireballs: [], pops: [], particles: [], bumps: new Map(),
+    time: 0, checkpoint: level.checkpoints[0], invuln: 1, dying: 0, winTimer: 0, introT: 2.2,
+    jumpBuffer: 0, coyote: 0, prevJump: false, bubble: null, prevPucker: false, starT: 0, featherT: 0, usedDouble: false,
+  });
+  updateHud(true);
+}
+
 function endGame(won) {
   S.over = true;
   const final = S.score;
-  if (won && final > S.best) { S.best = final; saveStr("faceJumpBest", final); }
-  $("end-title").textContent = won ? "Level Clear! 🎉" : "Game Over";
+  if (final > S.best) { S.best = final; saveStr("faceJumpBest", final); }
+  $("end-title").textContent = won ? "All worlds clear! 🎉" : "Game Over";
   $("end-text").innerHTML = won
-    ? `Score <b>${final}</b> · Coins <b>${S.coins}</b> · Time <b>${Math.floor(S.time)}s</b><br>Best <b>${S.best}</b>`
-    : `Score <b>${final}</b> · Coins <b>${S.coins}</b> — so close! Try again.`;
+    ? `Score <b>${final}</b> · Coins <b>${S.coins}</b><br>Best <b>${S.best}</b>`
+    : `Score <b>${final}</b> · Coins <b>${S.coins}</b> · reached World ${S.world + 1} (${WORLDS[S.world].name}) — try again!`;
   setTimeout(() => { if (S.over) $("gameover").classList.remove("hidden"); }, won ? 200 : 600);
 }
 
@@ -278,13 +419,16 @@ function showMenu() {
 
 let hudCache = "";
 function updateHud(force) {
-  const key = `${S.score}|${S.coins}|${S.lives}|${Math.floor(S.time)}`;
+  const powers = [S.starT > 0 ? `<span style="color:#ffd25e">★ ${Math.ceil(S.starT)}s</span>` : "", S.featherT > 0 ? `<span style="color:#9be7ff">🪶 ${Math.ceil(S.featherT)}s</span>` : ""].filter(Boolean).join(" · ");
+  const key = `${S.score}|${S.coins}|${S.lives}|${Math.floor(S.time)}|${S.world}|${powers}`;
   if (!force && key === hudCache) return;
   hudCache = key;
   $("score").textContent = S.score;
   $("coins").textContent = S.coins;
   $("time").textContent = Math.floor(S.time);
+  $("world").textContent = `${S.world + 1}/${WORLDS.length}`;
   $("lives").textContent = "♥".repeat(Math.max(0, S.lives));
+  $("power-status").innerHTML = powers;
 }
 
 // ---------- Physics ----------
@@ -326,17 +470,23 @@ function bumpBlock(tx, ty) {
   const c = tileAt(tx, ty);
   if (c === "?") {
     S.level.t[ty][tx] = "U";
-    S.coins++; S.score += 200;
-    S.pops.push({ x: tx + 0.5, y: ty - 0.3, vy: -9, life: 0.55 });
-    sfx("coin");
+    const power = S.level.powers.get(`${tx},${ty}`);
+    if (power) {
+      S.items.push({ x: tx + 0.05, y: ty - 0.1, w: 0.9, h: 0.9, kind: power, rise: 0.95, t: 0 });
+      sfx("star");
+    } else {
+      S.coins++; S.score += 200;
+      S.pops.push({ x: tx + 0.5, y: ty - 0.3, vy: -9, life: 0.55 });
+      sfx("coin");
+    }
   } else {
     sfx("bump");
   }
   if (c === "?" || c === "B") {
     S.bumps.set(`${tx},${ty}`, 0.15);
-    // Knock out any slime standing on the bumped block.
+    // Knock out any walking enemy standing on the bumped block.
     for (const e of S.enemies) {
-      if (e.active && !e.dead && !e.flipped && !e.squash && !e.trapped && Math.abs(e.y + e.h - ty) < 0.2 && e.x < tx + 1 && e.x + e.w > tx) {
+      if (e.kind !== "bat" && e.active && !e.dead && !e.flipped && !e.squash && !e.trapped && Math.abs(e.y + e.h - ty) < 0.2 && e.x < tx + 1 && e.x + e.w > tx) {
         e.flipped = true; e.vy = -8; S.score += 100; sfx("stomp");
       }
     }
@@ -352,8 +502,14 @@ function stepPlayer(h, run, held) {
     P.vx = approach(P.vx, 0, (P.onGround ? PHYS.decelGround : PHYS.decelAir) * h);
   }
   S.coyote = P.onGround ? PHYS.coyote : S.coyote - h;
+  if (P.onGround) S.usedDouble = false;
   if (S.jumpBuffer > 0 && S.coyote > 0) {
     P.vy = -PHYS.jumpV; S.jumpBuffer = 0; S.coyote = 0; P.onGround = false;
+    sfx("jump");
+  } else if (S.jumpBuffer > 0 && S.featherT > 0 && !S.usedDouble && !P.onGround) {
+    // Feather power: a second jump in mid-air
+    P.vy = -PHYS.jumpV * 0.95; S.jumpBuffer = 0; S.usedDouble = true;
+    burst(P.x + P.w / 2, P.y + P.h, "#9be7ff", 10, 4);
     sfx("jump");
   }
   S.jumpBuffer -= h;
@@ -372,19 +528,31 @@ function stepEnemies(h) {
       continue;
     }
     if (e.flipped) { e.vy += PHYS.gravity * h; e.y += e.vy * h; if (e.y > S.level.LH + 2) e.dead = true; continue; }
+    if (e.kind === "bat") { // flies in a wave, ignoring the tiles
+      e.t += h; e.x += e.vx * 0.8 * h; e.y = e.baseY + Math.sin(e.t * 2.4) * 1.1;
+      if (e.x < -2) e.dead = true;
+      continue;
+    }
     e.vy = Math.min(e.vy + PHYS.gravity * h, PHYS.maxFall);
     if (moveEntity(e, h)) e.vx = -e.vx;
     if (e.y > S.level.LH + 2) e.dead = true;
   }
 }
 
-// Player vs slimes: landing on top (feet were above its head last sub-step) stomps it, anything else hurts.
+function defeatEnemy(e, points) {
+  e.flipped = true; e.vy = -8; S.score += points;
+  burst(e.x + e.w / 2, e.y + e.h / 2, "#ffd25e", 8, 4);
+  sfx("stomp");
+}
+
+// Player vs enemies: landing on top (feet were above its head last sub-step) stomps it, anything else
+// hurts — except spiky slimes, which can't be stomped. The star power defeats anything it touches.
 // Returns true if the player died.
-function touchSlimes(prevBottom, held) {
+function touchEnemies(prevBottom, held) {
   const P = S.P;
   for (const e of S.enemies) {
     if (!e.active || e.dead || e.squash || e.flipped || !overlaps(P, e)) continue;
-    if (e.trapped) { // touching a trapped slime pops the bubble and defeats it
+    if (e.trapped) { // touching a trapped enemy pops the bubble and defeats it
       e.dead = true;
       S.score += 200;
       burst(e.x + e.w / 2, e.y + e.h / 2, "#c58bff", 10, 5);
@@ -392,13 +560,14 @@ function touchSlimes(prevBottom, held) {
       sfx("pop");
       continue;
     }
-    if (P.vy >= 0 && prevBottom <= e.y + 0.25) {
+    if (S.starT > 0) { defeatEnemy(e, 200); continue; }
+    if (P.vy >= 0 && prevBottom <= e.y + 0.25 && e.kind !== "spiky") {
       e.squash = 0.4;
       P.vy = held ? -15 : -10;
       S.score += 100;
       burst(e.x + e.w / 2, e.y + e.h / 2, "#c58bff", 8, 4);
       sfx("stomp");
-      return false; // the bounce carries the player clear of any neighbouring slime
+      return false; // the bounce carries the player clear of any neighbouring enemy
     }
     if (S.invuln <= 0) { die(); return true; }
   }
@@ -411,6 +580,7 @@ function die() {
   S.dying = 1.3;
   S.P.vy = S.P.y > S.level.LH ? 0 : -14;
   S.P.vx = 0;
+  S.starT = 0;
   sfx("hit");
   updateHud(true);
 }
@@ -420,8 +590,129 @@ function afterDeath() {
   S.P = newPlayer(S.checkpoint);
   S.invuln = 2;
   S.jumpBuffer = 0;
-  // Push back nearby slimes so the respawn isn't an instant hit.
-  for (const e of S.enemies) if (!e.dead && Math.abs(e.x - S.checkpoint) < 4) { e.x = S.checkpoint + 8; e.vx = -2; }
+  S.fireballs = [];
+  // Push back nearby enemies so the respawn isn't an instant hit.
+  for (const e of S.enemies) if (!e.dead && Math.abs(e.x - S.checkpoint) < 4) { e.x = S.checkpoint + 8; e.vx = -Math.abs(e.vx); }
+  // The boss keeps its damage but goes back to its spot and waits for you to come back in.
+  const B = S.boss;
+  if (B && !B.dead) Object.assign(B, { x: B.homeX, y: B.def.move === "swoop" ? 4 : 13 - B.h, vx: 0, vy: 0, state: "wait", stateT: 1.2, stun: 0, active: false });
+}
+
+// ---------- Power-ups ----------
+function collectPower(kind) {
+  if (kind === "star") S.starT = CFG.starTime;
+  else if (kind === "feather") S.featherT = CFG.featherTime;
+  else S.lives = Math.min(CFG.maxLives, S.lives + 1);
+  S.score += 500;
+  burst(S.P.x + S.P.w / 2, S.P.y, POWER_INFO[kind].color, 18, 6);
+  sfx("shield");
+  updateHud(true);
+}
+
+function updateItems(dt) {
+  for (const it of S.items) {
+    it.t += dt;
+    if (it.rise > 0) { const d = Math.min(it.rise, dt * 2); it.y -= d; it.rise -= d; }
+    if (!it.taken && overlaps(S.P, it)) { it.taken = true; collectPower(it.kind); }
+  }
+  S.items = S.items.filter((it) => !it.taken);
+}
+
+// ---------- Boss ----------
+function updateBoss(dt) {
+  const B = S.boss, L = S.level, P = S.P;
+  if (!B) return;
+  if (B.dead) { B.vy += PHYS.gravity * dt; B.y += B.vy * dt; if (B.y > L.LH + 4) S.boss = null; return; }
+  if (!B.active) { if (P.x > L.arenaX0) { B.active = true; sfx("power"); } return; }
+  B.t += dt; B.inv = Math.max(0, B.inv - dt);
+  const d = B.def, minX = L.arenaX0 + 0.5, maxX = L.gateX - B.w - 0.05;
+  if (B.stun > 0) {
+    B.stun -= dt; B.vx = 0;
+    if (d.move !== "swoop") { B.vy = Math.min(B.vy + PHYS.gravity * dt, PHYS.maxFall); moveEntity(B, dt); }
+    return;
+  }
+  const dir = Math.sign(P.x + P.w / 2 - (B.x + B.w / 2)) || -1;
+  if (d.move === "hop") {
+    const wasAir = !B.onGround;
+    B.vy = Math.min(B.vy + PHYS.gravity * dt, PHYS.maxFall);
+    if (moveEntity(B, dt)) B.vx = 0;
+    if (B.onGround) {
+      if (wasAir) { // landing: shake, and the Lava Golem throws fireballs
+        sfx("bump");
+        if (d.fireballs) for (const s of [-1, 1]) S.fireballs.push({ x: B.x + B.w / 2, y: B.y + 0.4, vx: s * 6, vy: -11 });
+      }
+      B.vx = 0;
+      if ((B.stateT -= dt) <= 0) { B.vy = -15; B.vx = dir * (4 + S.world); B.stateT = rand(0.7, 1.2); }
+    }
+  } else if (d.move === "charge") {
+    B.vy = Math.min(B.vy + PHYS.gravity * dt, PHYS.maxFall);
+    B.stateT -= dt;
+    if (B.state === "wait") { B.vx = 0; B.dir = dir; if (B.stateT <= 0) { B.state = "charge"; sfx("power"); } }
+    else if (B.state === "dizzy") { B.vx = 0; if (B.stateT <= 0) { B.state = "wait"; B.stateT = 0.9; } }
+    else B.vx = B.dir * 9;
+    const hit = moveEntity(B, dt) || (B.state === "charge" && (B.x <= minX || B.x >= maxX));
+    if (B.state === "charge" && hit) { B.state = "dizzy"; B.stateT = 1.8; sfx("bump"); }
+  } else { // swoop: hover high, then dive at the player and climb back
+    const cx = (minX + maxX) / 2;
+    if (B.state === "wait") {
+      B.x += (cx + Math.sin(B.t * 0.9) * (maxX - minX) * 0.4 - B.x) * Math.min(1, dt * 3);
+      B.y += (4 + Math.sin(B.t * 2) * 0.4 - B.y) * Math.min(1, dt * 3);
+      if ((B.stateT -= dt) <= 0) { B.state = "dive"; B.tx = clamp(P.x - B.w / 2, minX, maxX); sfx("power"); }
+    } else {
+      const ty = B.state === "dive" ? 13 - B.h : 4, sp = B.state === "dive" ? 9 : 6;
+      const dx = (B.state === "dive" ? B.tx : B.x) - B.x, dy = ty - B.y, dist = Math.hypot(dx, dy);
+      if (dist < 0.15) { B.state = B.state === "dive" ? "rise" : "wait"; B.stateT = 2.4; }
+      else { B.x += (dx / dist) * sp * dt; B.y += (dy / dist) * sp * dt; }
+    }
+  }
+  B.x = clamp(B.x, minX, maxX);
+}
+
+const bossSpiky = (B) => B.def.spiky && B.state !== "dizzy" && B.stun <= 0;
+
+// Player vs boss: stomp the head to hurt it (not while its spikes are up). Returns true if the player died.
+function touchBoss(prevBottom, held) {
+  const B = S.boss, P = S.P;
+  if (!B || !B.active || B.dead || !overlaps(P, B)) return false;
+  const fromAbove = P.vy >= 0 && prevBottom <= B.y + 0.4;
+  if ((fromAbove && !bossSpiky(B)) || S.starT > 0) {
+    if (B.inv <= 0) hitBoss();
+    if (fromAbove) P.vy = held ? -16 : -12;
+    return false;
+  }
+  if (B.inv > 0.5 || S.invuln > 0) return false; // just got hit: let the player bounce clear
+  die();
+  return true;
+}
+
+function hitBoss() {
+  const B = S.boss;
+  B.hp--; B.inv = 1; B.stun = 0;
+  if (B.state === "dive") B.state = "rise";
+  burst(B.x + B.w / 2, B.y, "#ffd25e", 16, 6);
+  sfx("stomp");
+  S.score += 500;
+  if (B.hp <= 0) {
+    B.dead = true; B.vy = -10;
+    S.score += 2000 * (S.world + 1);
+    // Open the gate to the flag
+    for (let y = 0; y < S.level.LH; y++) if (S.level.t[y][S.level.gateX] === "G") { S.level.t[y][S.level.gateX] = "."; burst(S.level.gateX + 0.5, y + 0.5, "#c4c9ce", 3, 4); }
+    S.fireballs = [];
+    sfx("win");
+  }
+}
+
+function updateFireballs(dt) {
+  const P = S.P;
+  for (const f of S.fireballs) {
+    f.vy += 30 * dt; f.x += f.vx * dt; f.y += f.vy * dt;
+    if (solidAt(Math.floor(f.x), Math.floor(f.y)) || f.y > S.level.LH) f.dead = true;
+    if (!f.dead && f.x > P.x - 0.2 && f.x < P.x + P.w + 0.2 && f.y > P.y - 0.2 && f.y < P.y + P.h + 0.2) {
+      f.dead = true;
+      if (S.starT <= 0 && S.invuln <= 0) die();
+    }
+  }
+  S.fireballs = S.fireballs.filter((f) => !f.dead);
 }
 
 // ---------- Bubble (pucker / X) ----------
@@ -456,6 +747,14 @@ function updateBubble(dt) {
       return;
     }
   }
+  // A bubble stuns the boss: it stops, drops its spikes, and can be stomped
+  const B = S.boss;
+  if (B && B.active && !B.dead && b.x > B.x - b.r && b.x < B.x + B.w + b.r && b.y > B.y - b.r && b.y < B.y + B.h + b.r) {
+    B.stun = CFG.bossStun;
+    if (B.state === "dive") B.state = "wait";
+    S.bubble = null;
+    sfx("bubble");
+  }
 }
 
 function burst(x, y, color, n = 12, speed = 6) {
@@ -480,6 +779,7 @@ function update(dt) {
     if (tracker.lostFor > 0.4) { S.waiting = tracker.lostMessage(); return; }
     if (!calib.value) { S.waiting = "Hold still… calibrating"; return; }
   }
+  if (S.introT > 0) { S.introT -= dt; return; } // "World 2 — Desert" title card
 
   const P = S.P, L = S.level;
 
@@ -487,7 +787,9 @@ function update(dt) {
     S.winTimer -= dt;
     P.vx = 0; P.vy = Math.min(P.vy + PHYS.gravity * dt, PHYS.maxFall);
     moveEntity(P, dt);
-    if (S.winTimer <= 0) endGame(true);
+    if (S.winTimer <= 0) {
+      if (S.world + 1 < WORLDS.length) { S.world++; loadWorld(); } else endGame(true);
+    }
     return;
   }
 
@@ -501,6 +803,8 @@ function update(dt) {
 
   S.time += dt;
   S.invuln = Math.max(0, S.invuln - dt);
+  S.starT = Math.max(0, S.starT - dt);
+  S.featherT = Math.max(0, S.featherT - dt);
 
   // Input
   let run, held;
@@ -517,23 +821,27 @@ function update(dt) {
   if (puckering && !S.prevPucker && !S.bubble) blowBubble(); // one bubble at a time
   S.prevPucker = puckering;
 
-  // Wake up slimes just before they scroll into view
+  // Wake up enemies just before they scroll into view
   const viewTiles = view.W / tileSize();
   for (const e of S.enemies) if (!e.active && e.x < S.camX / tileSize() + viewTiles + 2) e.active = true;
 
-  // Physics in small sub-steps so fast falls never skip through a tile or past a slime's head.
-  // Slime contact is checked every sub-step too, so stomps still work when the frame rate drops.
+  // Physics in small sub-steps so fast falls never skip through a tile or past an enemy's head.
+  // Contact is checked every sub-step too, so stomps still work when the frame rate drops.
   const steps = Math.ceil(dt / (1 / 120)), h = dt / steps;
   for (let i = 0; i < steps; i++) {
     const prevBottom = P.y + P.h;
     stepPlayer(h, run, held);
     stepEnemies(h);
-    if (touchSlimes(prevBottom, held)) return; // player died
+    updateBoss(h);
+    if (touchEnemies(prevBottom, held) || touchBoss(prevBottom, held)) return; // player died
   }
 
   updateBubble(dt);
+  updateItems(dt);
+  updateFireballs(dt);
+  if (S.dying > 0) return;
 
-  // Squashed slimes disappear after a moment; trapped ones break free when their bubble runs out
+  // Squashed enemies disappear after a moment; trapped ones break free when their bubble runs out
   for (const e of S.enemies) {
     if (e.squash) { e.squash -= dt; if (e.squash <= 0) e.dead = true; }
     if (e.trapped) { e.trapped -= dt; if (e.trapped <= 0) { e.trapped = 0; e.vy = 0; } }
@@ -557,8 +865,8 @@ function update(dt) {
   if (P.y > L.LH + 1) { die(); return; }
   if (P.x + P.w > L.flagX + 0.4) {
     S.won = true;
-    S.winTimer = 1.4;
-    S.score += Math.max(0, 200 - Math.floor(S.time)) * 10; // time bonus
+    S.winTimer = 1.6;
+    S.score += Math.max(0, 250 - Math.floor(S.time)) * 10; // time bonus
     burst(L.flagX + 0.5, P.y, "#7dff8a", 30, 8);
     sfx("win");
   }
@@ -573,6 +881,7 @@ function render(now) {
   const T = tileSize();
   const offY = H - T * 15;
   const sec = now / 1000;
+  const theme = WORLDS[S.world] || WORLDS[0];
 
   // Camera follows the player
   if (S.level && S.P) {
@@ -583,39 +892,52 @@ function render(now) {
 
   // Sky + parallax scenery
   const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, "#5aa9ff"); sky.addColorStop(1, "#bfe6ff");
+  sky.addColorStop(0, theme.sky[0]); sky.addColorStop(1, theme.sky[1]);
   ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
-  drawParallax(T, offY, camX, sec);
+  drawParallax(T, offY, camX, theme);
   if (!S.level) return;
 
   ctx.save();
   ctx.translate(-Math.round(camX), offY);
 
-  // Tiles
+  // Tiles (Castle pits are lava)
   const L = S.level;
   const c0 = Math.max(0, Math.floor(camX / T) - 1), c1 = Math.min(L.LW - 1, Math.floor((camX + W) / T) + 1);
+  if (theme.lava) {
+    for (let tx = c0; tx <= c1; tx++) if (L.t[14][tx] === ".") {
+      ctx.fillStyle = "#ff6b1a"; ctx.fillRect(tx * T, 13.35 * T + Math.sin(sec * 3 + tx) * T * 0.08, T + 1, T * 2);
+      ctx.fillStyle = "#ffd25e"; ctx.fillRect(tx * T, 13.35 * T + Math.sin(sec * 3 + tx) * T * 0.08, T + 1, T * 0.12);
+    }
+  }
   for (let ty = 0; ty < L.LH; ty++) {
     for (let tx = c0; tx <= c1; tx++) {
       const c = L.t[ty][tx];
-      if (c !== ".") drawTile(c, tx, ty, T, sec);
+      if (c !== ".") drawTile(c, tx, ty, T, sec, theme);
     }
   }
   drawFlagAndCastle(L.flagX, T, sec);
 
-  // Coin pop-ups from ? blocks
+  // Coin pop-ups from ? blocks, power-ups
   for (const p of S.pops) drawCoin(p.x * T, p.y * T, T, sec * 3);
+  for (const it of S.items) drawItem(it, T, sec);
 
   for (const e of S.enemies) {
     if (!e.active) continue;
-    drawSlime(e, T, sec);
+    if (e.kind === "bat") drawBat(e, T, sec); else drawSlime(e, T, sec);
     if (e.trapped && !(e.trapped < 1 && Math.floor(sec * 8) % 2 === 0)) {
       drawBubble((e.x + e.w / 2) * T, (e.y + e.h / 2) * T, T * 0.75, sec); // blinks just before it bursts
     }
   }
+  if (S.boss) drawBoss(S.boss, T, sec);
+  for (const f of S.fireballs) {
+    ctx.fillStyle = "#ff6b1a"; ctx.shadowColor = "#ffd25e"; ctx.shadowBlur = 14;
+    ctx.beginPath(); ctx.arc(f.x * T, f.y * T, T * 0.28, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
   if (S.bubble) drawBubble(S.bubble.x * T, S.bubble.y * T, S.bubble.r * T, sec);
 
   if (S.P) {
-    const blink = S.invuln > 0 && Math.floor(sec * 10) % 2 === 0;
+    const blink = S.invuln > 0 && S.starT <= 0 && Math.floor(sec * 10) % 2 === 0;
     if (!blink) drawHero(S.P, T, sec);
   }
 
@@ -627,44 +949,57 @@ function render(now) {
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  const B = S.boss;
+  if (B && B.active && !B.dead) drawBossBar(B);
   if (S.waiting) drawBanner(ctx, W, H, S.waiting);
+  else if (S.introT > 0) drawBanner(ctx, W, H, `World ${S.world + 1} / ${WORLDS.length} — ${theme.name}`, "#ffffff");
+  else if (S.won) drawBanner(ctx, W, H, S.world + 1 < WORLDS.length ? `World ${S.world + 1} clear!` : "All worlds clear!", "#7dff8a");
 }
 
-function drawParallax(T, offY, camX, sec) {
+function drawParallax(T, offY, camX, theme) {
   const { W, H } = view;
   // Clouds
-  const cw = T * 9, cOff = camX * 0.2;
-  for (let i = Math.floor(cOff / cw) - 1; i < (cOff + W) / cw + 1; i++) {
-    const x = i * cw - cOff + ((i * 37) % 5) * T * 0.6, y = offY + T * (1.5 + ((i * 13) % 3));
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
-    for (const [dx, dy, r] of [[0, 0, 0.8], [0.8, -0.3, 1], [1.7, 0, 0.75]]) {
-      ctx.beginPath(); ctx.arc(x + dx * T, y + dy * T, r * T, 0, Math.PI * 2); ctx.fill();
+  if (theme.clouds) {
+    const cw = T * 9, cOff = camX * 0.2;
+    for (let i = Math.floor(cOff / cw) - 1; i < (cOff + W) / cw + 1; i++) {
+      const x = i * cw - cOff + ((i * 37) % 5) * T * 0.6, y = offY + T * (1.5 + ((i * 13) % 3));
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      for (const [dx, dy, r] of [[0, 0, 0.8], [0.8, -0.3, 1], [1.7, 0, 0.75]]) {
+        ctx.beginPath(); ctx.arc(x + dx * T, y + dy * T, r * T, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+  } else { // stalactites hanging from the ceiling
+    const sw = T * 3, sOff = camX * 0.3;
+    ctx.fillStyle = theme.hills[0];
+    for (let i = Math.floor(sOff / sw) - 1; i < (sOff + W) / sw + 1; i++) {
+      const x = i * sw - sOff, len = T * (1 + (((i * 7) % 4) + 4) % 4 * 0.6);
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x + sw * 0.5, len); ctx.lineTo(x + sw, 0); ctx.fill();
     }
   }
   // Hills
   const hw = T * 16, hOff = camX * 0.45, base = offY + 13 * T;
   for (let i = Math.floor(hOff / hw) - 1; i < (hOff + W) / hw + 1; i++) {
     const x = i * hw - hOff, r = T * (3 + (((i % 3) + 3) % 3) * 1.2);
-    ctx.fillStyle = (i & 1) ? "#6fcf73" : "#5cbf68";
+    ctx.fillStyle = (i & 1) ? theme.hills[0] : theme.hills[1];
     ctx.beginPath(); ctx.ellipse(x + hw / 2, base, r * 1.4, r, 0, Math.PI, 0); ctx.fill();
   }
-  ctx.fillStyle = "#5cbf68";
+  ctx.fillStyle = theme.hills[1];
   ctx.fillRect(0, base, W, H - base);
 }
 
-function drawTile(c, tx, ty, T, sec) {
+function drawTile(c, tx, ty, T, sec, theme) {
   let x = tx * T, y = ty * T;
   const bump = S.bumps.get(`${tx},${ty}`);
   if (bump) y -= Math.sin((1 - bump / 0.15) * Math.PI) * T * 0.3;
   switch (c) {
     case "#": {
-      ctx.fillStyle = "#9a5b2c"; ctx.fillRect(x, y, T + 1, T + 1);
-      ctx.fillStyle = "#7d4520";
+      ctx.fillStyle = theme.dirt[0]; ctx.fillRect(x, y, T + 1, T + 1);
+      ctx.fillStyle = theme.dirt[1];
       ctx.fillRect(x + T * 0.15, y + T * 0.55, T * 0.12, T * 0.12);
       ctx.fillRect(x + T * 0.65, y + T * 0.3, T * 0.12, T * 0.12);
       if (tileAt(tx, ty - 1) !== "#") {
-        ctx.fillStyle = "#3fb24a"; ctx.fillRect(x, y, T + 1, T * 0.28);
-        ctx.fillStyle = "#2e8f38"; ctx.fillRect(x, y + T * 0.24, T + 1, T * 0.06);
+        ctx.fillStyle = theme.top[0]; ctx.fillRect(x, y, T + 1, T * 0.28);
+        ctx.fillStyle = theme.top[1]; ctx.fillRect(x, y + T * 0.24, T + 1, T * 0.06);
       }
       break;
     }
@@ -693,10 +1028,11 @@ function drawTile(c, tx, ty, T, sec) {
       }
       break;
     }
-    case "S": {
-      ctx.fillStyle = "#9aa0a6"; ctx.fillRect(x, y, T, T);
-      ctx.fillStyle = "#c4c9ce"; ctx.fillRect(x, y, T, T * 0.12); ctx.fillRect(x, y, T * 0.12, T);
-      ctx.fillStyle = "#6b7075"; ctx.fillRect(x, y + T * 0.88, T, T * 0.12); ctx.fillRect(x + T * 0.88, y, T * 0.12, T);
+    case "S": case "G": {
+      ctx.fillStyle = c === "G" ? "#6b6f7a" : "#9aa0a6"; ctx.fillRect(x, y, T, T);
+      ctx.fillStyle = c === "G" ? "#8b909c" : "#c4c9ce"; ctx.fillRect(x, y, T, T * 0.12); ctx.fillRect(x, y, T * 0.12, T);
+      ctx.fillStyle = "#4a4d55"; ctx.fillRect(x, y + T * 0.88, T, T * 0.12); ctx.fillRect(x + T * 0.88, y, T * 0.12, T);
+      if (c === "G") { ctx.fillStyle = "#3a3d45"; ctx.fillRect(x + T * 0.42, y, T * 0.16, T); }
       break;
     }
     case "P": {
@@ -728,7 +1064,7 @@ function drawFlagAndCastle(fx, T, sec) {
   const px = (fx + 0.5) * T;
   ctx.fillStyle = "#d9dde2"; ctx.fillRect(px - T * 0.06, 2.5 * T, T * 0.12, 10.5 * T);
   ctx.fillStyle = "#ffd25e"; ctx.beginPath(); ctx.arc(px, 2.4 * T, T * 0.22, 0, Math.PI * 2); ctx.fill();
-  const flagY = S.won ? clamp(2.8 * T + (1.4 - S.winTimer) * 6 * T, 2.8 * T, 11 * T) : 2.8 * T;
+  const flagY = S.won ? clamp(2.8 * T + (1.6 - S.winTimer) * 6 * T, 2.8 * T, 11 * T) : 2.8 * T;
   const wave = Math.sin(sec * 5) * T * 0.1;
   ctx.fillStyle = "#3fb24a";
   ctx.beginPath(); ctx.moveTo(px, flagY); ctx.lineTo(px - T * 1.3, flagY + T * 0.45 + wave); ctx.lineTo(px, flagY + T * 0.9); ctx.closePath(); ctx.fill();
@@ -746,13 +1082,24 @@ function drawFlagAndCastle(fx, T, sec) {
   ctx.fillRect(cx + 2.2 * T, top - 1.9 * T, 0.6 * T, 0.8 * T);
 }
 
-// Pip: an original round hero with a blue bandana.
+// Pip: an original round hero with a blue bandana. Star = rainbow glow, feather = little wings.
 function drawHero(P, T, sec) {
   const x = P.x * T, y = P.y * T, w = P.w * T, h = P.h * T;
   const moving = Math.abs(P.vx) > 0.5 && P.onGround;
   const step = moving ? Math.sin(sec * 18) * T * 0.08 : 0;
   ctx.save();
   if (S.dying > 0) { ctx.translate(x + w / 2, y + h / 2); ctx.rotate(Math.PI); ctx.translate(-(x + w / 2), -(y + h / 2)); }
+  if (S.starT > 0) {
+    ctx.fillStyle = `hsla(${(sec * 600) % 360},100%,60%,0.45)`;
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, T * 0.9, 0, Math.PI * 2); ctx.fill();
+  }
+  if (S.featherT > 0) {
+    ctx.fillStyle = "rgba(220,245,255,0.9)";
+    const flap = Math.sin(sec * (P.onGround ? 4 : 16)) * h * 0.12;
+    for (const s of [-1, 1]) {
+      ctx.beginPath(); ctx.ellipse(x + w / 2 + s * w * 0.62, y + h * 0.45 - flap, w * 0.28, h * 0.16, s * 0.6, 0, Math.PI * 2); ctx.fill();
+    }
+  }
   // feet
   ctx.fillStyle = "#5a2d0c";
   ctx.beginPath(); ctx.ellipse(x + w * 0.28 + step, y + h * 0.95, w * 0.2, h * 0.08, 0, 0, Math.PI * 2); ctx.fill();
@@ -791,9 +1138,33 @@ function drawBubble(cx, cy, r, sec) {
   ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2; ctx.stroke();
 }
 
-// Slime: an original purple blob enemy.
+// Power-up item floating above its block.
+function drawItem(it, T, sec) {
+  const cx = (it.x + it.w / 2) * T, cy = (it.y + it.h / 2) * T + Math.sin(sec * 4) * T * 0.08, r = T * 0.45;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.shadowColor = POWER_INFO[it.kind].color; ctx.shadowBlur = 18;
+  if (it.kind === "star") {
+    ctx.fillStyle = "#ffd25e"; ctx.rotate(sec * 2);
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) { const rr = i % 2 ? r * 0.45 : r, a = (i / 10) * Math.PI * 2 - Math.PI / 2; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fill();
+  } else if (it.kind === "feather") {
+    ctx.rotate(-0.6);
+    ctx.fillStyle = "#e6faff"; ctx.beginPath(); ctx.ellipse(0, 0, r * 0.4, r, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#5bb6d6"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(0, r * 1.2); ctx.stroke();
+  } else {
+    ctx.fillStyle = "#ff5ea8";
+    ctx.beginPath(); ctx.moveTo(0, r * 0.8);
+    ctx.bezierCurveTo(-r * 1.3, -r * 0.1, -r * 0.6, -r * 1.1, 0, -r * 0.4);
+    ctx.bezierCurveTo(r * 0.6, -r * 1.1, r * 1.3, -r * 0.1, 0, r * 0.8); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Slime: an original blob enemy (purple; the red spiky kind can't be stomped).
 function drawSlime(e, T, sec) {
-  const x = e.x * T, y = e.y * T, w = e.w * T, h = e.h * T;
+  const x = e.x * T, y = e.y * T, w = e.w * T, h = e.h * T, spiky = e.kind === "spiky";
   ctx.save();
   if (e.flipped) { ctx.translate(x + w / 2, y + h / 2); ctx.scale(1, -1); ctx.translate(-(x + w / 2), -(y + h / 2)); }
   if (e.squash) {
@@ -803,7 +1174,14 @@ function drawSlime(e, T, sec) {
     return;
   }
   const wob = Math.sin(sec * 8 + e.x) * h * 0.05;
-  ctx.fillStyle = "#8e44ad";
+  if (spiky) {
+    ctx.fillStyle = "#e9ecef";
+    for (let k = 0; k < 4; k++) {
+      const sx = x + w * (0.15 + k * 0.23);
+      ctx.beginPath(); ctx.moveTo(sx - w * 0.09, y + wob + h * 0.12); ctx.lineTo(sx, y + wob - h * 0.28); ctx.lineTo(sx + w * 0.09, y + wob + h * 0.12); ctx.fill();
+    }
+  }
+  ctx.fillStyle = spiky ? "#d6336c" : "#8e44ad";
   ctx.beginPath();
   ctx.moveTo(x, y + h);
   ctx.quadraticCurveTo(x - w * 0.05, y + wob, x + w / 2, y + wob);
@@ -822,6 +1200,95 @@ function drawSlime(e, T, sec) {
   ctx.beginPath(); ctx.moveTo(x + w * 0.2, y + h * 0.3); ctx.lineTo(x + w * 0.42, y + h * 0.38);
   ctx.moveTo(x + w * 0.8, y + h * 0.3); ctx.lineTo(x + w * 0.58, y + h * 0.38); ctx.stroke();
   ctx.restore();
+}
+
+function drawBat(e, T, sec) {
+  const cx = (e.x + e.w / 2) * T, cy = (e.y + e.h / 2) * T, w = e.w * T, h = e.h * T;
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (e.flipped) ctx.scale(1, -1);
+  const flap = Math.sin(sec * 18 + e.x) * h * 0.4;
+  ctx.fillStyle = "#3b2a55";
+  for (const s of [-1, 1]) {
+    ctx.beginPath(); ctx.moveTo(s * w * 0.2, 0); ctx.lineTo(s * w * 0.95, -flap); ctx.lineTo(s * w * 0.7, h * 0.25); ctx.lineTo(s * w * 0.45, h * 0.1); ctx.closePath(); ctx.fill();
+  }
+  ctx.beginPath(); ctx.ellipse(0, 0, w * 0.3, h * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#ff4d5e";
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * w * 0.1, -h * 0.08, w * 0.06, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+
+// Bosses, drawn in tile units around their box. Spikes show when they can't be stomped.
+function drawBoss(B, T, sec) {
+  const x = B.x * T, y = B.y * T, w = B.w * T, h = B.h * T, d = B.def;
+  if (B.inv > 0 && !B.dead && Math.floor(sec * 12) % 2 === 0) return; // blink after a hit
+  ctx.save();
+  if (B.dead) { ctx.translate(x + w / 2, y + h / 2); ctx.scale(1, -1); ctx.translate(-(x + w / 2), -(y + h / 2)); }
+  ctx.shadowColor = d.color; ctx.shadowBlur = 20;
+  if (d.move === "swoop") { // Bat Baron
+    const flap = Math.sin(sec * (B.state === "wait" ? 8 : 16)) * h * 0.5;
+    ctx.fillStyle = d.color;
+    for (const s of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(x + w / 2 + s * w * 0.15, y + h * 0.35); ctx.lineTo(x + w / 2 + s * w * 0.75, y - flap);
+      ctx.lineTo(x + w / 2 + s * w * 0.6, y + h * 0.7); ctx.lineTo(x + w / 2 + s * w * 0.35, y + h * 0.5); ctx.closePath(); ctx.fill();
+    }
+    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h / 2, w * 0.25, h * 0.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#c92a2a"; ctx.fillRect(x + w * 0.3, y + h * 0.65, w * 0.4, h * 0.35); // cape
+  } else if (d.move === "charge") { // Spike Shell
+    if (bossSpiky(B)) {
+      ctx.fillStyle = "#f1f3f5";
+      for (let k = 0; k < 5; k++) { const sx = x + w * (0.15 + k * 0.175); ctx.beginPath(); ctx.moveTo(sx - w * 0.07, y + h * 0.25); ctx.lineTo(sx, y - h * 0.3); ctx.lineTo(sx + w * 0.07, y + h * 0.25); ctx.fill(); }
+    }
+    ctx.fillStyle = d.color;
+    ctx.beginPath(); ctx.ellipse(x + w / 2, y + h * 0.7, w * 0.5, h * 0.7, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = "#8a1c12"; ctx.fillRect(x, y + h * 0.65, w, h * 0.12);
+    ctx.fillStyle = "#f4d58d"; ctx.fillRect(x + w * 0.05, y + h * 0.77, w * 0.9, h * 0.23);
+  } else { // King Slime / Lava Golem
+    ctx.fillStyle = d.color;
+    ctx.beginPath(); ctx.moveTo(x, y + h);
+    ctx.quadraticCurveTo(x - w * 0.05, y, x + w / 2, y); ctx.quadraticCurveTo(x + w * 1.05, y, x + w, y + h); ctx.closePath(); ctx.fill();
+    if (d.fireballs) { ctx.strokeStyle = "#ffd25e"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(x + w * 0.25, y + h * 0.3); ctx.lineTo(x + w * 0.4, y + h * 0.6); ctx.lineTo(x + w * 0.3, y + h * 0.9); ctx.moveTo(x + w * 0.7, y + h * 0.35); ctx.lineTo(x + w * 0.6, y + h * 0.7); ctx.stroke(); }
+    else { // crown
+      ctx.fillStyle = "#ffd25e";
+      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.05); ctx.lineTo(x + w * 0.3, y - h * 0.3); ctx.lineTo(x + w * 0.4, y - h * 0.12); ctx.lineTo(x + w * 0.5, y - h * 0.35);
+      ctx.lineTo(x + w * 0.6, y - h * 0.12); ctx.lineTo(x + w * 0.7, y - h * 0.3); ctx.lineTo(x + w * 0.7, y + h * 0.05); ctx.closePath(); ctx.fill();
+    }
+  }
+  ctx.shadowBlur = 0;
+  // angry eyes (X when dizzy / stunned)
+  const dizzy = B.stun > 0 || B.state === "dizzy";
+  const ey = d.move === "swoop" ? y + h * 0.35 : y + h * (d.move === "charge" ? 0.45 : 0.45);
+  for (const dx of [0.36, 0.64]) {
+    const ex = x + w * dx, er = Math.min(w, h) * 0.11;
+    if (dizzy) {
+      ctx.strokeStyle = "#111"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ex - er, ey - er); ctx.lineTo(ex + er, ey + er); ctx.moveTo(ex + er, ey - er); ctx.lineTo(ex - er, ey + er); ctx.stroke();
+    } else {
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(ex + Math.sign(S.P.x - B.x) * er * 0.35, ey, er * 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#111"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ex - er * 1.2, ey - er * (dx < 0.5 ? 1.6 : 1)); ctx.lineTo(ex + er * 1.2, ey - er * (dx < 0.5 ? 1 : 1.6)); ctx.stroke();
+    }
+  }
+  if (dizzy) { // circling stars
+    for (let k = 0; k < 3; k++) {
+      const a = sec * 5 + (k * Math.PI * 2) / 3;
+      ctx.fillStyle = "#ffd25e"; ctx.beginPath(); ctx.arc(x + w / 2 + Math.cos(a) * w * 0.4, y - T * 0.3 + Math.sin(a) * T * 0.15, T * 0.1, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  ctx.restore();
+  if (B.stun > 0) drawBubble(x + w / 2, y + h / 2, Math.max(w, h) * 0.65, sec);
+}
+
+function drawBossBar(B) {
+  const { W } = view, bw = Math.min(W * 0.4, 360), x = (W - bw) / 2, y = W < 800 ? 120 : 70;
+  ctx.fillStyle = "rgba(0,0,0,0.55)"; ctx.fillRect(x - 3, y - 3, bw + 6, 18);
+  for (let k = 0; k < B.def.hp; k++) {
+    ctx.fillStyle = k < B.hp ? "#ff4d5e" : "rgba(255,255,255,0.15)";
+    ctx.fillRect(x + (k * bw) / B.def.hp + 1, y, bw / B.def.hp - 2, 12);
+  }
+  ctx.font = "700 14px system-ui, sans-serif"; ctx.fillStyle = "#ffffff"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  ctx.fillText(`${B.def.name}${bossSpiky(B) ? " — spikes up! bubble it" : ""}`, W / 2, y - 6);
 }
 
 // ---------- Main loop ----------

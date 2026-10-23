@@ -156,3 +156,48 @@ boss HP/defeat bonus/escape, every power, multi-fruit swipe, streak reset on mis
 - [x] PR https://github.com/blurboy1985/face-arcade/pull/2 merged; deployed (wrangler version ff7089bc) —
   live /ninja runs to the stage-5 boss with no console errors.
 - [ ] Real webcam play — needs the user.
+
+## Stages, bosses & powers for the other four games (2026-10-24)
+Request: "do the same if applicable" (Hand Ninja got stages + rising difficulty, bosses, powers, bigger items).
+One branch `stages-all-games`, one commit per game → PR → self-review → merge → deploy (pre-authorized).
+
+**Face Pilot** — 5 sectors (Asteroid Belt → Nebula → Pirate Lanes → Hive → Void), ~40 s of waves then a boss.
+- Ramp per sector: asteroid rate/speed; new enemies from sector 2: fighters that shoot aimed bolts; sector 4+: mines.
+- Bosses (HP bar, bullet patterns; laser hits; shield blocks bullets): Rock Titan (rock volleys), Saucer Queen
+  (aimed bursts), Pirate Cruiser (spread fans), Hive Mother (spawns fighters + spread), Void Dreadnought (all + rings).
+- Power capsules (bigger, magnet pickup): spread shot, rapid fire, mega laser (fat, 2 dmg), extra life, smart bomb.
+- Fatter laser hitbox. Win after sector 5; setting: start sector.
+
+**Face Jump** — 4 worlds (Grassland = current level, Desert, Caves, Castle), each ending in a boss arena with a gate
+that opens when the boss falls; score/lives carry over.
+- Worlds 2–4 generated from fixed seeds (same layout every play) out of safe chunks: pit width ≤ 4 (jump reach ~8),
+  pipe/stair height ≤ 4–5 (jump ~5). Difficulty: more/faster slimes, wider pits; new enemies: spiky slimes (can't be
+  stomped — bubble them) from world 2, bats (sine flight, stompable) from world 3.
+- Bosses (stomp the head; a bubble stuns for 2 s): King Slime (hops), Spike Shell (charges, spiky unless stunned/dizzy),
+  Bat Baron (swoops), Lava Golem (hops + fireballs).
+- Power-ups from some ? blocks: ★ star (invincible 8 s), 🪶 feather (double jump 15 s), ♥ extra life.
+- Setting: start world.
+
+**Face Pong** — 1P mode becomes a 5-opponent tournament (bosses with gimmicks, first to 5 each): Rookie, Twin Paddles,
+Wall Builder (barrier blocks mid-court), Speed Demon, Omega (big paddle, splits the ball). Power orbs mid-court for
+everyone (ball → orb gives it to the last hitter): big paddle, multi-ball, freeze opponent, goal guard. Bigger ball.
+
+**Hand Hockey** — same idea: 5-opponent tournament (Rookie, Goalie Giant, Twin Mallets, Speedster, Iron Golem) + table
+power orbs (big mallet, multi-puck, freeze opponent, goal guard). Slightly bigger puck/mallets.
+
+Verify each with its debug hook: stage/opponent progression and end screens, each boss behaviour, each power,
+difficulty numbers rising, no console errors; Face Jump: a scripted bot can finish every world (reachability).
+- [x] Verified via debug hooks (keyboard/injected input), 1280×720 + narrow pane, no console errors on any page:
+  - Pilot: full run sector 1→5 → "Galaxy saved!"; fighters from s2, mines from s4; boss shots 2→125 per fight;
+    spread=4 lasers, rapid cd 0.08, mega, life, smart bomb clears; shield blocks shots; mine → 8 shots;
+    capsule magnet; laser hits 6 px past an edge, misses at 9 px.
+  - Jump: bot clears all 4 worlds' terrain with 0 deaths (31–37 s each); King Slime 3 stomps → gate opens →
+    flag → next world (score/lives kept); Spike Shell: spiky stomp kills, bubble stun + dizzy allow stomps;
+    Bat Baron dives & stompable; Lava Golem fireballs; star hurts boss; ? block → feather → double jump;
+    world 4 → "All worlds clear!". (Bot initially failed W1 by over-jumping a stair — bot fix, level unchanged.)
+  - Pong: perfect-P1 bot wins tournament (45/78/56/32/26 s per boss) → champion; loss → retry same boss;
+    big paddle 170→272, freeze, multi-ball 3, guard saves, orb → last hitter, walls bounce, Omega shrinks 289→207.
+    Fixed: CPU aim error never missed (Rookie took 530 s) → errors >1 so bosses can be beaten.
+  - Hockey: all bosses play to the end, puck never stalls (was: Goalie Giant left slow pucks dead → fixed);
+    bot results per boss (3 games): Rookie 3/3, Goalie Giant 1/3, Speedster 2/3, Twin Mallets 0/3,
+    Iron Golem 0/3 → reordered + softened; powers, guard, orb, retry/champion flows OK.
